@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "contactlens",
+    "name": "EyeCare Hospital",
     "slug": "contactlens",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -17,6 +17,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.madha.contactlens",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -34,6 +35,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2d05cb4c-d1c8-4d0c-a42f-55e84757bc50"
+      }
     }
   }
 }
