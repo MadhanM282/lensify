@@ -20,7 +20,7 @@ export default function DashboardScreen() {
     <View style={[styles.container, { backgroundColor: c.background }]}>
       <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
         <Text style={[styles.welcome, { color: c.text }]}>Welcome, {user?.name ?? 'User'}</Text>
-        <Text style={[styles.sub, { color: c.placeholder }]}>EyeCare Hospital</Text>
+        <Text style={[styles.sub, { color: c.placeholder }]}>Lensify</Text>
       </View>
 
       <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>

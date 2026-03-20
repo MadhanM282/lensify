@@ -42,8 +42,8 @@ export default function RegisterScreen() {
       style={[styles.container, { backgroundColor: c.background }]}
     >
       <View style={styles.header}>
-        <Text style={[styles.logo, { color: c.primary }]}>EyeCare</Text>
-        <Text style={[styles.subtitle, { color: c.text }]}>Hospital</Text>
+        <Text style={[styles.logo, { color: c.primary }]}>Lensify</Text>
+        <Text style={[styles.subtitle, { color: c.text }]}>Contact lens records</Text>
       </View>
 
       <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>

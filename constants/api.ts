@@ -1,6 +1,9 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
+/** Deployed API (Render). Used in release builds if EXPO_PUBLIC_API_URL is unset. */
+const PRODUCTION_API_FALLBACK = 'https://lensifyserver.onrender.com';
+
 /**
  * Backend API base URL.
  * - EXPO_PUBLIC_API_URL: override in .env if needed
@@ -14,10 +17,9 @@ const getBaseUrl = (): string => {
     return envUrl.replace(/\/$/, '');
   }
 
-  // Shared APK/production build should always use a public backend URL via env.
+  // Release builds (EAS/APK): prefer env; fall back to deployed Render API.
   if (!__DEV__) {
-    console.warn('EXPO_PUBLIC_API_URL is missing for production build.');
-    return 'https://invalid.localhost';
+    return PRODUCTION_API_FALLBACK.replace(/\/$/, '');
   }
 
   if (Platform.OS === 'android') {

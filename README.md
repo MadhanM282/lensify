@@ -1,6 +1,12 @@
-# lensify
+# Lensify
 
-React Native (Expo) app for an eye care hospital with **per-user login** and contact lens features. Includes a **Node.js backend** for auth and lens records.
+React Native (Expo) app with **per-user login** and contact lens features. App display name: **Lensify** (`app.json`). Includes a **Node.js backend** for auth and lens records.
+
+## Production API
+
+Deployed backend: **`https://lensifyserver.onrender.com`**
+
+Set `EXPO_PUBLIC_API_URL` in `.env` if you use a different host (see `.env.example`).
 
 ## Features
 
@@ -46,7 +52,7 @@ Then open in Expo Go or a simulator. The app talks to the backend at:
 ### Important for installed APK
 
 When you install an APK, it cannot reach `localhost` on your computer.  
-Set `EXPO_PUBLIC_API_URL` to a reachable backend URL before building the APK (LAN IP for same network testing, or a public server URL for real use).
+Set `EXPO_PUBLIC_API_URL` before building if you need something other than the default (**`https://lensifyserver.onrender.com`**). For local-only testing, use your LAN IP or `localhost` as documented above.
 
 ## Share APK With Others
 
