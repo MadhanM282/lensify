@@ -67,6 +67,16 @@ Set `EXPO_PUBLIC_API_URL` before building if you need something other than the d
 4. Share the generated APK link/file.
 5. Anyone installing the APK can use the app as long as your backend URL is live.
 
+### Android build: `AAPT: error: file failed to compile` on `assets_images_icon.png`
+
+Some PNG exports (color profile, 16-bit, metadata) break Android’s resource compiler. Re-encode the files under `assets/images/`:
+
+```bash
+npm run fix-assets
+```
+
+Then commit the updated PNGs and rebuild. (Uses `sharp` in devDependencies.)
+
 ## Tech stack
 
 - **App**: Expo (SDK 54), Expo Router, TypeScript, AsyncStorage (for token + user).
