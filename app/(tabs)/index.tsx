@@ -56,9 +56,6 @@ export default function DashboardScreen() {
         </Pressable>
       </View>
 
-      <Pressable style={[styles.logout, { borderColor: c.border }]} onPress={handleLogout}>
-        <Text style={[styles.logoutText, { color: c.placeholder }]}>Sign out</Text>
-      </Pressable>
     </View>
   );
 }

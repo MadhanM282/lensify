@@ -12,8 +12,11 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { RequiredStar } from '@/components/RequiredStar';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function LoginScreen() {
   const { login } = useAuth();
@@ -21,8 +24,9 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const colorScheme = useColorScheme() ?? 'light';
+  const colorScheme = useColorScheme();
   const c = Colors[colorScheme];
+  const insets = useSafeAreaInsets();
 
   const handleLogin = async () => {
     setError('');
@@ -41,6 +45,10 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={[styles.container, { backgroundColor: c.background }]}
     >
+      <View style={[styles.themeRow, { paddingTop: Math.max(insets.top, 12) }]}>
+        <View style={{ flex: 1 }} />
+        <ThemeToggle showLabel />
+      </View>
       <View style={styles.header}>
         <Text style={[styles.logo, { color: c.primary }]}>Lensify</Text>
         <Text style={[styles.subtitle, { color: c.text }]}>Contact lens records</Text>
@@ -50,6 +58,9 @@ export default function LoginScreen() {
         <Text style={[styles.title, { color: c.text }]}>Sign in</Text>
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
+        <Text style={[styles.fieldLabel, { color: c.text }]}>
+          Email <RequiredStar />
+        </Text>
         <TextInput
           style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
           placeholder="Email"
@@ -60,6 +71,9 @@ export default function LoginScreen() {
           keyboardType="email-address"
           editable={!loading}
         />
+        <Text style={[styles.fieldLabel, { color: c.text }]}>
+          Password <RequiredStar />
+        </Text>
         <TextInput
           style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
           placeholder="Password"
@@ -96,6 +110,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
+  themeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    marginHorizontal: -8,
+  },
   header: {
     alignItems: 'center',
     marginBottom: 32,
@@ -122,6 +142,11 @@ const styles = StyleSheet.create({
   error: {
     color: '#dc2626',
     marginBottom: 12,
+  },
+  fieldLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 6,
   },
   input: {
     borderWidth: 1,

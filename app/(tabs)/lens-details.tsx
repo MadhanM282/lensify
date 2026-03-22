@@ -1,5 +1,5 @@
 import { useLensStorage } from '@/context/LensStorageContext';
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -12,13 +12,15 @@ import {
   View,
 } from 'react-native';
 import Colors from '@/constants/Colors';
+import { RequiredStar } from '@/components/RequiredStar';
 import { useColorScheme } from '@/components/useColorScheme';
-import { LENS_COLORS, type LensColor } from '@/types';
+import { LENS_COLORS, type EyeLensSide, type LensColor, type PatientGender } from '@/types';
 import {
   baseCurveFromK1K2,
-  convertSpectacleRxToContact,
+  convertSpectacleRxToContactUnified,
   diameterFromHvidMm,
   formatPower,
+  toricContactLensPreferredNote,
   VERTEX_DISTANCE_M,
 } from '@/utils/powerConversion';
 
@@ -36,13 +38,86 @@ type EyeDetails = {
   notes: string;
 };
 
+/** When sphere is entered, HVID / Ks / cyl / axis are required for that eye. */
+function validateEyeMandatoryFields(ed: EyeDetails, label: string): string | null {
+  if (!ed.sphere.trim()) return null;
+  const missing: string[] = [];
+  if (!ed.hvid.trim()) missing.push('HVID');
+  if (!ed.k1.trim()) missing.push('K1');
+  if (!ed.k2.trim()) missing.push('K2');
+  if (!ed.cylinder.trim()) missing.push('cylinder');
+  if (!ed.axis.trim()) missing.push('axis');
+  if (missing.length === 0) return null;
+  return `${label}: enter ${missing.join(', ')}.`;
+}
+
+function eyeDetailsToSide(ed: EyeDetails): EyeLensSide | undefined {
+  if (!ed.sphere.trim()) return undefined;
+  return {
+    hvid: ed.hvid.trim() || undefined,
+    diameter: ed.diameter.trim() || undefined,
+    baseCurve: ed.baseCurve.trim() || undefined,
+    k1: ed.k1.trim() || undefined,
+    k2: ed.k2.trim() || undefined,
+    sphere: ed.sphere.trim(),
+    cylinder: ed.cylinder.trim() || undefined,
+    axis: ed.axis.trim() || undefined,
+    lensType: ed.lensType === 'clear' ? undefined : ed.lensType,
+    lensColor: ed.lensColor || undefined,
+    notes: ed.notes.trim() || undefined,
+  };
+}
+
+/** Step 1: name, gender, age. Returns `null` if valid. */
+function getStep1ValidationError(
+  patientName: string,
+  gender: PatientGender | '',
+  age: string
+): string | null {
+  if (!patientName.trim()) return 'Please enter the patient name.';
+  if (!gender) return 'Please select a gender.';
+  const ageTrim = age.trim();
+  if (!ageTrim) return 'Please enter the patient age.';
+  const ageNum = parseFloat(ageTrim.replace(',', '.'));
+  if (!Number.isFinite(ageNum) || ageNum <= 0 || ageNum > 130) {
+    return 'Please enter a valid age (1–130).';
+  }
+  return null;
+}
+
+/** Full form for save (step 1 + both eyes + at least one complete Rx). */
+function getLensSaveValidationError(
+  patientName: string,
+  gender: PatientGender | '',
+  age: string,
+  right: EyeDetails,
+  left: EyeDetails
+): string | null {
+  const s1 = getStep1ValidationError(patientName, gender, age);
+  if (s1) return s1;
+  const odErr = validateEyeMandatoryFields(right, 'Right eye (OD)');
+  if (odErr) return odErr;
+  const osErr = validateEyeMandatoryFields(left, 'Left eye (OS)');
+  if (osErr) return osErr;
+  const od = eyeDetailsToSide(right);
+  const os = eyeDetailsToSide(left);
+  if (!od && !os) return 'Enter spherical power for at least one eye (OD and/or OS).';
+  const primarySphere = (od?.sphere ?? os?.sphere ?? '').trim();
+  const sphereNum = parseFloat(primarySphere.replace(',', '.'));
+  if (Number.isNaN(sphereNum)) return 'Please enter a valid spherical power.';
+  return null;
+}
+
 export default function LensDetailsScreen() {
   const { addRecord } = useLensStorage();
+  const scrollRef = useRef<ScrollView>(null);
+  /** 0 = patient (name, gender, age); 1 = lens & Rx */
+  const [formStep, setFormStep] = useState<0 | 1>(0);
   const [patientName, setPatientName] = useState('');
-  const [gender, setGender] = useState<'male' | 'female' | 'other' | ''>('');
+  const [gender, setGender] = useState<PatientGender | ''>('');
   const [age, setAge] = useState('');
-  const [lensType, setLensType] = useState<'soft' | 'hard' | null>(null);
-  const [selectedEye, setSelectedEye] = useState<'right' | 'left' | null>(null);
+  const [lensType, setLensType] = useState<'soft' | 'hard'>('soft');
+  const [selectedEye, setSelectedEye] = useState<'right' | 'left'>('right');
   const [eyeDetails, setEyeDetails] = useState<{ right: EyeDetails; left: EyeDetails }>({
     right: {
       hvid: '',
@@ -72,14 +147,62 @@ export default function LensDetailsScreen() {
     },
   });
   const [conversionResult, setConversionResult] = useState('');
+  const [conversionHint, setConversionHint] = useState('');
   const [conversionError, setConversionError] = useState('');
   const colorScheme = useColorScheme() ?? 'light';
   const c = Colors[colorScheme];
 
-  const currentEyeData = selectedEye ? eyeDetails[selectedEye] : null;
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+  }, [formStep]);
+
+  const currentEyeData = eyeDetails[selectedEye];
+
+  const step1Complete = useMemo(
+    () => getStep1ValidationError(patientName, gender, age) === null,
+    [patientName, gender, age]
+  );
+
+  const canSaveLensRecord = useMemo(
+    () =>
+      getLensSaveValidationError(patientName, gender, age, eyeDetails.right, eyeDetails.left) === null,
+    [patientName, gender, age, eyeDetails]
+  );
+
+  const goToLensStep = () => {
+    const err = getStep1ValidationError(patientName, gender, age);
+    if (err) {
+      Alert.alert('Required', err);
+      return;
+    }
+    setFormStep(1);
+  };
+
+  /** Recalculate DIA / BC for both eyes when soft/hard fitting changes */
+  useEffect(() => {
+    const fit = lensType;
+    setEyeDetails((prev) => {
+      const upd = (ed: EyeDetails): EyeDetails => {
+        let nextD = ed.diameter;
+        let nextBc = ed.baseCurve;
+        const h = parseFloat(ed.hvid.replace(',', '.'));
+        if (Number.isFinite(h)) {
+          const dia = diameterFromHvidMm(h, fit);
+          if (dia !== null) nextD = dia.toFixed(1);
+        }
+        const k1 = parseFloat(ed.k1.replace(',', '.'));
+        const k2 = parseFloat(ed.k2.replace(',', '.'));
+        if (Number.isFinite(k1) && Number.isFinite(k2)) {
+          const bc = baseCurveFromK1K2(k1, k2, fit);
+          if (Number.isFinite(bc)) nextBc = Math.round(bc).toFixed(0);
+        }
+        return { ...ed, diameter: nextD, baseCurve: nextBc };
+      };
+      return { right: upd(prev.right), left: upd(prev.left) };
+    });
+  }, [lensType]);
 
   const updateEyeDetail = <K extends keyof EyeDetails>(key: K, value: EyeDetails[K]) => {
-    if (!selectedEye) return;
     setEyeDetails((prev) => ({
       ...prev,
       [selectedEye]: { ...prev[selectedEye], [key]: value },
@@ -90,7 +213,7 @@ export default function LensDetailsScreen() {
     updateEyeDetail('hvid', text);
     const n = parseFloat(text.replace(',', '.'));
     if (!Number.isNaN(n)) {
-      const dia = diameterFromHvidMm(n);
+      const dia = diameterFromHvidMm(n, lensType);
       updateEyeDetail('diameter', dia !== null ? dia.toFixed(1) : '');
     } else if (text.trim() === '') {
       updateEyeDetail('diameter', '');
@@ -101,24 +224,24 @@ export default function LensDetailsScreen() {
     const x = parseFloat(a.replace(',', '.'));
     const y = parseFloat(b.replace(',', '.'));
     if (Number.isNaN(x) || Number.isNaN(y)) return;
-    const bc = baseCurveFromK1K2(x, y);
+    const bc = baseCurveFromK1K2(x, y, lensType);
     if (Number.isFinite(bc)) updateEyeDetail('baseCurve', Math.round(bc).toFixed(0));
   };
 
   const handleK1Change = (text: string) => {
     updateEyeDetail('k1', text);
-    updateBaseCurveFromK(text, currentEyeData?.k2 || '');
+    updateBaseCurveFromK(text, currentEyeData.k2 || '');
   };
 
   const handleK2Change = (text: string) => {
     updateEyeDetail('k2', text);
-    updateBaseCurveFromK(currentEyeData?.k1 || '', text);
+    updateBaseCurveFromK(currentEyeData.k1 || '', text);
   };
 
   const handleConvertToContactLens = () => {
-    if (!currentEyeData) return;
     setConversionError('');
     setConversionResult('');
+    setConversionHint('');
 
     const sph = parseFloat(currentEyeData.sphere.replace(',', '.'));
     if (Number.isNaN(sph)) {
@@ -131,22 +254,36 @@ export default function LensDetailsScreen() {
       return;
     }
 
-    const converted = convertSpectacleRxToContact(sph, cylNum);
+    const converted = convertSpectacleRxToContactUnified(sph, cylNum);
     if (!converted) {
       setConversionError('Cannot convert.');
       return;
     }
 
     const axisValue = currentEyeData.axis.trim() === '' ? '0' : currentEyeData.axis.trim();
-    setConversionResult(`${formatPower(converted.sphere)} / ${formatPower(converted.cylinder)} x ${axisValue}`);
+    const vertexNote =
+      'Within ±4.00 D: contact power usually matches spectacle (no vertex change). Beyond ±4.00 D: vertex at 12 mm.';
+
+    if (converted.mode === 'spherical_equivalent') {
+      setConversionResult(
+        `Spherical CL: ${formatPower(converted.contactSphere)} D  (SE = ${formatPower(sph)} + ½×(${formatPower(cylNum)}) = ${formatPower(converted.seSpectacle)})`
+      );
+      setConversionHint(
+        `|Cylinder| ≤ 0.75 D: spherical equivalent rule applied.\n${vertexNote}`
+      );
+    } else {
+      setConversionResult(`${formatPower(converted.sphere)} / ${formatPower(converted.cylinder)} x ${axisValue}`);
+      const toricNote = toricContactLensPreferredNote(cylNum);
+      setConversionHint([toricNote, vertexNote].filter(Boolean).join('\n\n'));
+    }
   };
 
   const clearForm = () => {
     setPatientName('');
     setGender('');
     setAge('');
-    setLensType(null);
-    setSelectedEye(null);
+    setLensType('soft');
+    setSelectedEye('right');
     setEyeDetails({
       right: {
         hvid: '',
@@ -176,53 +313,57 @@ export default function LensDetailsScreen() {
       },
     });
     setConversionResult('');
+    setConversionHint('');
     setConversionError('');
+    setFormStep(0);
   };
 
   const handleSave = async () => {
+    const err = getLensSaveValidationError(patientName, gender, age, eyeDetails.right, eyeDetails.left);
+    if (err) {
+      Alert.alert('Required', err);
+      return;
+    }
+
     const name = patientName.trim();
-    if (!name) {
-      Alert.alert('Required', 'Please enter patient name.');
-      return;
-    }
-
-    const eyesToSave = [];
-    if (eyeDetails.right.sphere.trim()) eyesToSave.push({ eye: 'right', data: eyeDetails.right });
-    if (eyeDetails.left.sphere.trim()) eyesToSave.push({ eye: 'left', data: eyeDetails.left });
-
-    if (eyesToSave.length === 0) {
-      Alert.alert('Required', 'Please enter spherical power for at least one eye.');
-      return;
-    }
+    const ageTrim = age.trim();
+    const od = eyeDetailsToSide(eyeDetails.right);
+    const os = eyeDetailsToSide(eyeDetails.left);
+    const primarySphere = (od?.sphere ?? os?.sphere ?? '').trim();
+    const sphereNum = parseFloat(primarySphere.replace(',', '.'));
+    const computedPowerType: 'minus' | 'plus' = sphereNum < 0 ? 'minus' : 'plus';
 
     try {
-      for (const { eye, data } of eyesToSave) {
-        const sphereNum = parseFloat(data.sphere.replace(',', '.'));
-        if (Number.isNaN(sphereNum)) {
-          Alert.alert('Required', `Please enter a valid spherical power for ${eye} eye.`);
-          return;
-        }
-        const computedPowerType: 'minus' | 'plus' = sphereNum < 0 ? 'minus' : 'plus';
-
-        await addRecord({
-          patientId: 'p-' + Date.now() + '-' + eye,
-          patientName: name + ' (' + (eye === 'right' ? 'R' : 'L') + ')',
-          hvid: data.hvid.trim() || '',
-          diameter: data.diameter.trim() || '',
-          baseCurve: data.baseCurve.trim() || '',
-          power: data.sphere.trim(),
-          powerType: computedPowerType,
-          sphere: data.sphere.trim(),
-          cylinder: data.cylinder.trim() || undefined,
-          axis: data.axis.trim() || undefined,
-          lensType: data.lensType === 'clear' ? undefined : data.lensType,
-          lensColor: data.lensColor || undefined,
-          notes: data.notes.trim() || undefined,
-          savedAt: new Date().toISOString(),
-        });
-      }
+      await addRecord({
+        patientId: 'p-' + Date.now(),
+        patientName: name,
+        age: ageTrim,
+        gender: gender as PatientGender,
+        fittingType: lensType,
+        od,
+        os,
+        hvid: od?.hvid ?? os?.hvid ?? '',
+        diameter: od?.diameter ?? os?.diameter ?? '',
+        baseCurve: od?.baseCurve ?? os?.baseCurve ?? '',
+        power: primarySphere,
+        powerType: computedPowerType,
+        sphere: primarySphere,
+        cylinder: od?.cylinder ?? os?.cylinder,
+        axis: od?.axis ?? os?.axis,
+        lensType: od?.lensType ?? os?.lensType,
+        lensColor: od?.lensColor ?? os?.lensColor,
+        notes: undefined,
+        savedAt: new Date().toISOString(),
+      });
+      const savedEyes = [od && 'right (OD)', os && 'left (OS)'].filter(Boolean);
+      const eyesLine =
+        savedEyes.length === 2
+          ? 'Right (OD) and left (OS) are saved in one record. Open Records to see each eye separately.'
+          : savedEyes.length === 1
+            ? `${savedEyes[0]} saved in this record. The other eye shows as “no values” in Records until you add it.`
+            : 'Record saved.';
       clearForm();
-      Alert.alert('Saved', 'Contact lens details have been saved.');
+      Alert.alert('Saved', `${eyesLine} Timestamp is stored on the record.`);
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save. Is the server running?');
     }
@@ -232,61 +373,111 @@ export default function LensDetailsScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={[styles.container, { backgroundColor: c.background }]}
     >
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <View style={[styles.section, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[styles.sectionTitle, { color: c.text }]}>Contact lens details</Text>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
+        {formStep === 0 ? (
+          <View style={[styles.section, { backgroundColor: c.card, borderColor: c.border }]}>
+            <Text style={[styles.stepBadge, { color: c.primary, backgroundColor: c.background }]}>Step 1 of 2</Text>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>Patient information</Text>
+            <Text style={[styles.stepIntro, { color: c.placeholder }]}>
+              Patient name, gender, and age are required. Tap Next to enter lens measurements.
+            </Text>
 
-          <Text style={[styles.label, { color: c.text }]}>Patient name *</Text>
-          <TextInput
-            style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
-            placeholder=""
-            placeholderTextColor={c.placeholder}
-            value={patientName}
-            onChangeText={setPatientName}
-          />
+            <Text style={[styles.label, { color: c.text }]}>
+              Patient name <RequiredStar />
+            </Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
+              placeholder="Full name"
+              placeholderTextColor={c.placeholder}
+              value={patientName}
+              onChangeText={setPatientName}
+            />
 
-          <Text style={[styles.label, { color: c.text }]}>Gender</Text>
-          <View style={styles.row}>
+            <Text style={[styles.label, { color: c.text }]}>
+              Gender <RequiredStar />
+            </Text>
+            <View style={styles.row}>
+              <Pressable
+                style={[
+                  styles.optionSmall,
+                  { borderColor: c.border, backgroundColor: gender === 'male' ? c.primary : c.background },
+                ]}
+                onPress={() => setGender('male')}
+              >
+                <Text style={[styles.optionText, { color: gender === 'male' ? '#fff' : c.text }]}>Male</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.optionSmall,
+                  { borderColor: c.border, backgroundColor: gender === 'female' ? c.primary : c.background },
+                ]}
+                onPress={() => setGender('female')}
+              >
+                <Text style={[styles.optionText, { color: gender === 'female' ? '#fff' : c.text }]}>Female</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.optionSmall,
+                  { borderColor: c.border, backgroundColor: gender === 'other' ? c.primary : c.background },
+                ]}
+                onPress={() => setGender('other')}
+              >
+                <Text style={[styles.optionText, { color: gender === 'other' ? '#fff' : c.text }]}>Other</Text>
+              </Pressable>
+            </View>
+
+            <Text style={[styles.label, { color: c.text }]}>
+              Age <RequiredStar />
+            </Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
+              placeholder="Age in years"
+              placeholderTextColor={c.placeholder}
+              value={age}
+              onChangeText={setAge}
+              keyboardType="number-pad"
+            />
+
             <Pressable
-              style={[
-                styles.optionSmall,
-                { borderColor: c.border, backgroundColor: gender === 'male' ? c.primary : c.background },
+              disabled={!step1Complete}
+              style={({ pressed }) => [
+                styles.button,
+                { backgroundColor: c.primary },
+                !step1Complete && styles.buttonDisabled,
+                step1Complete && pressed && styles.buttonPressed,
               ]}
-              onPress={() => setGender('male')}
+              onPress={goToLensStep}
+              accessibilityState={{ disabled: !step1Complete }}
             >
-              <Text style={[styles.optionText, { color: gender === 'male' ? '#fff' : c.text }]}>Male</Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.optionSmall,
-                { borderColor: c.border, backgroundColor: gender === 'female' ? c.primary : c.background },
-              ]}
-              onPress={() => setGender('female')}
-            >
-              <Text style={[styles.optionText, { color: gender === 'female' ? '#fff' : c.text }]}>Female</Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.optionSmall,
-                { borderColor: c.border, backgroundColor: gender === 'other' ? c.primary : c.background },
-              ]}
-              onPress={() => setGender('other')}
-            >
-              <Text style={[styles.optionText, { color: gender === 'other' ? '#fff' : c.text }]}>Other</Text>
+              <Text style={styles.buttonText}>Next</Text>
             </Pressable>
           </View>
+        ) : (
+          <View style={[styles.section, { backgroundColor: c.card, borderColor: c.border }]}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.backLink,
+                { borderColor: c.border, backgroundColor: c.tint, opacity: pressed ? 0.8 : 1 },
+              ]}
+              onPress={() => setFormStep(0)}
+              accessibilityRole="button"
+              accessibilityLabel="Back to patient information"
+            >
+              <Text style={[styles.backLinkText, { color: c.background }]}>← Back</Text>
+            </Pressable>
+            <Text style={[styles.stepBadge, { color: c.primary, backgroundColor: c.background }]}>Step 2 of 2</Text>
+            <Text style={[styles.sectionTitle, { color: c.text }]}>Lens &amp; prescription</Text>
+            <Text style={[styles.stepIntro, { color: c.placeholder, marginBottom: 4 }]}>
+              For <Text style={{ fontWeight: '700', color: c.text }}>{patientName.trim() || 'patient'}</Text>
+              {gender ? ` · ${gender === 'male' ? 'Male' : gender === 'female' ? 'Female' : 'Other'}` : ''}
+              {age.trim() ? ` · ${age.trim()} yrs` : ''}
+            </Text>
 
-          <Text style={[styles.label, { color: c.text }]}>Age</Text>
-          <TextInput
-            style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
-            placeholder="Enter age"
-            placeholderTextColor={c.placeholder}
-            value={age}
-            onChangeText={setAge}
-            keyboardType="number-pad"
-          />
-
-          <Text style={[styles.label, { color: c.text }]}>Lens type *</Text>
+            <Text style={[styles.label, { color: c.text }]}>Lens type</Text>
           <View style={styles.row}>
             <Pressable
               style={[
@@ -308,7 +499,7 @@ export default function LensDetailsScreen() {
             </Pressable>
           </View>
 
-          <Text style={[styles.label, { color: c.text }]}>Eye *</Text>
+          <Text style={[styles.label, { color: c.text }]}>Eye</Text>
           <View style={styles.row}>
             <Pressable
               style={[
@@ -330,75 +521,92 @@ export default function LensDetailsScreen() {
             </Pressable>
           </View>
 
-          <Text style={[styles.label, { color: c.text }]}>HVID</Text>
+          <Text style={[styles.label, { color: c.text }]}>
+            HVID (mm) <RequiredStar />
+          </Text>
+          <Text
+            style={[
+              styles.instruction,
+              { color: c.placeholder, borderWidth: 0 },
+            ]}
+          >
+            Hold a mm ruler next to the open eye. Measure the colored iris width from limbus to limbus (white-to-white
+            edge).
+          </Text>
           <TextInput
             key={`hvid-${selectedEye}`}
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
             placeholder="Enter HVID"
             placeholderTextColor={c.placeholder}
-            value={selectedEye ? eyeDetails[selectedEye].hvid : ''}
+            value={eyeDetails[selectedEye].hvid}
             onChangeText={(text) => {
-              if (!selectedEye) {
-                Alert.alert('Required', 'Please select Right Eye (OD) or Left Eye (OS) first.');
-                return;
-              }
               handleHvidChange(text);
             }}
             keyboardType="decimal-pad"
             editable={true}
           />
 
-          <Text style={[styles.label, { color: c.text }]}>Diameter</Text>
+          <Text style={[styles.label, { color: c.text }]}>Diameter (DIA)</Text>
+          <Text style={[styles.hint, { color: c.placeholder }]}>
+            {lensType === 'soft' ? 'Soft: DIA = HVID + 2 mm' : 'Hard: DIA = HVID − 2 mm'}
+          </Text>
           <TextInput
             key={`diameter-${selectedEye}`}
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
-            placeholder="Auto-calculated from HVID"
+            placeholder="Auto from HVID + lens type"
             placeholderTextColor={c.placeholder}
-            value={selectedEye ? eyeDetails[selectedEye].diameter : ''}
+            value={eyeDetails[selectedEye].diameter}
             onChangeText={(text) => {
-              if (selectedEye) updateEyeDetail('diameter', text);
+              updateEyeDetail('diameter', text);
             }}
             keyboardType="decimal-pad"
             editable={true}
           />
 
-          <Text style={[styles.label, { color: c.text }]}>K1</Text>
+          <Text style={[styles.label, { color: c.text }]}>
+            K1 <RequiredStar />
+          </Text>
           <TextInput
             key={`k1-${selectedEye}`}
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
             placeholder="Enter K1"
             placeholderTextColor={c.placeholder}
-            value={selectedEye ? eyeDetails[selectedEye].k1 : ''}
+            value={eyeDetails[selectedEye].k1}
             onChangeText={(text) => {
-              if (selectedEye) handleK1Change(text);
+              handleK1Change(text);
             }}
             keyboardType="decimal-pad"
             editable={true}
           />
 
-          <Text style={[styles.label, { color: c.text }]}>K2</Text>
+          <Text style={[styles.label, { color: c.text }]}>
+            K2 <RequiredStar />
+          </Text>
           <TextInput
             key={`k2-${selectedEye}`}
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
             placeholder="Enter K2"
             placeholderTextColor={c.placeholder}
-            value={selectedEye ? eyeDetails[selectedEye].k2 : ''}
+            value={eyeDetails[selectedEye].k2}
             onChangeText={(text) => {
-              if (selectedEye) handleK2Change(text);
+              handleK2Change(text);
             }}
             keyboardType="decimal-pad"
             editable={true}
           />
 
           <Text style={[styles.label, { color: c.text }]}>Base curve</Text>
+          <Text style={[styles.hint, { color: c.placeholder }]}>
+            {lensType === 'soft' ? 'Soft: BC = (K1 + K2) / 2 + 1' : 'Hard: BC = (K1 + K2) / 2 − 1'}
+          </Text>
           <TextInput
             key={`baseCurve-${selectedEye}`}
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
-            placeholder="Auto-calculated from K1 & K2"
+            placeholder="Auto from K1, K2 + lens type"
             placeholderTextColor={c.placeholder}
-            value={selectedEye ? eyeDetails[selectedEye].baseCurve : ''}
+            value={eyeDetails[selectedEye].baseCurve}
             onChangeText={(text) => {
-              if (selectedEye) updateEyeDetail('baseCurve', text);
+              updateEyeDetail('baseCurve', text);
             }}
             keyboardType="decimal-pad"
             editable={true}
@@ -409,24 +617,27 @@ export default function LensDetailsScreen() {
             <Pressable
               style={[
                 styles.optionSmall,
-                { borderColor: c.border, backgroundColor: selectedEye && eyeDetails[selectedEye].lensType === 'clear' ? c.primary : c.background },
+                { borderColor: c.border, backgroundColor: eyeDetails[selectedEye].lensType === 'clear' ? c.primary : c.background },
               ]}
-              onPress={() => { if (selectedEye) { updateEyeDetail('lensType', 'clear'); updateEyeDetail('lensColor', ''); } }}
+              onPress={() => {
+                updateEyeDetail('lensType', 'clear');
+                updateEyeDetail('lensColor', '');
+              }}
             >
-              <Text style={[styles.optionText, { color: selectedEye && eyeDetails[selectedEye].lensType === 'clear' ? '#fff' : c.text }]}>Clear</Text>
+              <Text style={[styles.optionText, { color: eyeDetails[selectedEye].lensType === 'clear' ? '#fff' : c.text }]}>Transparent</Text>
             </Pressable>
             <Pressable
               style={[
                 styles.optionSmall,
-                { borderColor: c.border, backgroundColor: selectedEye && eyeDetails[selectedEye].lensType === 'tint' ? c.primary : c.background },
+                { borderColor: c.border, backgroundColor: eyeDetails[selectedEye].lensType === 'tint' ? c.primary : c.background },
               ]}
-              onPress={() => { if (selectedEye) updateEyeDetail('lensType', 'tint'); }}
+              onPress={() => updateEyeDetail('lensType', 'tint')}
             >
-              <Text style={[styles.optionText, { color: selectedEye && eyeDetails[selectedEye].lensType === 'tint' ? '#fff' : c.text }]}>Tint</Text>
+              <Text style={[styles.optionText, { color: eyeDetails[selectedEye].lensType === 'tint' ? '#fff' : c.text }]}>Tint</Text>
             </Pressable>
           </View>
 
-          {selectedEye && eyeDetails[selectedEye].lensType === 'tint' && (
+          {eyeDetails[selectedEye].lensType === 'tint' && (
             <>
               <Text style={[styles.label, { color: c.text }]}>Color</Text>
               <View style={styles.colorRow}>
@@ -448,43 +659,49 @@ export default function LensDetailsScreen() {
             </>
           )}
 
-          <Text style={[styles.label, { color: c.text }]}>Spherical (sphere) *</Text>
+          <Text style={[styles.label, { color: c.text }]}>
+            Spherical (sph) <RequiredStar />
+          </Text>
           <TextInput
             key={`sphere-${selectedEye}`}
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
             placeholder="Enter sphere value"
             placeholderTextColor={c.placeholder}
-            value={selectedEye ? eyeDetails[selectedEye].sphere : ''}
+            value={eyeDetails[selectedEye].sphere}
             onChangeText={(text) => {
-              if (selectedEye) updateEyeDetail('sphere', text);
+              updateEyeDetail('sphere', text);
             }}
             keyboardType="decimal-pad"
             editable={true}
           />
 
-          <Text style={[styles.label, { color: c.text }]}>Cylindrical (cyl)</Text>
+          <Text style={[styles.label, { color: c.text }]}>
+            Cylindrical (cyl) <RequiredStar />
+          </Text>
           <TextInput
             key={`cylinder-${selectedEye}`}
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
             placeholder="Enter cylinder value"
             placeholderTextColor={c.placeholder}
-            value={selectedEye ? eyeDetails[selectedEye].cylinder : ''}
+            value={eyeDetails[selectedEye].cylinder}
             onChangeText={(text) => {
-              if (selectedEye) updateEyeDetail('cylinder', text);
+              updateEyeDetail('cylinder', text);
             }}
             keyboardType="decimal-pad"
             editable={true}
           />
 
-          <Text style={[styles.label, { color: c.text }]}>Axis</Text>
+          <Text style={[styles.label, { color: c.text }]}>
+            Axis <RequiredStar />
+          </Text>
           <TextInput
             key={`axis-${selectedEye}`}
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
             placeholder="Enter axis (0-180)"
             placeholderTextColor={c.placeholder}
-            value={selectedEye ? eyeDetails[selectedEye].axis : ''}
+            value={eyeDetails[selectedEye].axis}
             onChangeText={(text) => {
-              if (selectedEye) updateEyeDetail('axis', text);
+              updateEyeDetail('axis', text);
             }}
             keyboardType="decimal-pad"
             editable={true}
@@ -510,9 +727,14 @@ export default function LensDetailsScreen() {
             ) : null}
           </View>
           {conversionError ? <Text style={[styles.conversionError, { color: '#dc2626' }]}>{conversionError}</Text> : null}
+          {conversionHint ? (
+            <Text style={[styles.conversionNote, { color: c.placeholder, marginTop: 8 }]}>{conversionHint}</Text>
+          ) : null}
 
           <Text style={[styles.conversionNote, { color: c.placeholder }]}>Minus (−): distance vision, Plus (+): near vision.</Text>
-          <Text style={[styles.conversionNote, { color: c.placeholder }]}>Up to ±4.00: no change. Above ±4.00: vertex correction (d = 0.012).</Text>
+          <Text style={[styles.conversionNote, { color: c.placeholder }]}>
+            |Cyl| ≤ 0.75 D: SE = sphere + ½ cylinder, then vertex on SE. |Cyl| {'>'} 0.75 D: toric vertex on both meridians.
+          </Text>
 
           <Text style={[styles.label, { color: c.text }]}>Notes</Text>
           <TextInput
@@ -520,21 +742,33 @@ export default function LensDetailsScreen() {
             style={[styles.input, styles.notesInput, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
             placeholder="Enter any additional notes"
             placeholderTextColor={c.placeholder}
-            value={selectedEye ? eyeDetails[selectedEye].notes : ''}
+            value={eyeDetails[selectedEye].notes}
             onChangeText={(text) => {
-              if (selectedEye) updateEyeDetail('notes', text);
+              updateEyeDetail('notes', text);
             }}
             multiline
             editable={true}
           />
 
+          <Text style={[styles.hint, { color: c.placeholder, marginTop: 8 }]}>
+            Save time is stored on the record (Records tab).
+          </Text>
+
           <Pressable
-            style={({ pressed }) => [styles.button, { backgroundColor: c.primary }, pressed && styles.buttonPressed]}
+            disabled={!canSaveLensRecord}
+            style={({ pressed }) => [
+              styles.button,
+              { backgroundColor: c.primary },
+              !canSaveLensRecord && styles.buttonDisabled,
+              canSaveLensRecord && pressed && styles.buttonPressed,
+            ]}
             onPress={handleSave}
+            accessibilityState={{ disabled: !canSaveLensRecord }}
           >
             <Text style={styles.buttonText}>Save lens details</Text>
           </Pressable>
         </View>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -552,6 +786,35 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 8,
+  },
+  stepBadge: {
+    alignSelf: 'flex-start',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginBottom: 10,
+  },
+  stepIntro: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  backLink: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 14,
+  },
+  backLinkText: {
+    fontSize: 15,
+    fontWeight: '600',
   },
   label: {
     fontSize: 14,
@@ -601,6 +864,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 20,
   },
+  buttonDisabled: {
+    opacity: 0.45,
+  },
   buttonPressed: { opacity: 0.85 },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   convertRow: {
@@ -619,4 +885,17 @@ const styles = StyleSheet.create({
   conversionInlineResult: { fontSize: 16, fontWeight: '700', flex: 1, flexWrap: 'wrap' },
   conversionError: { marginTop: 8, fontSize: 13, fontWeight: '600' },
   conversionNote: { marginTop: 6, fontSize: 12 },
+  hint: {
+    fontSize: 12,
+    marginTop: 4,
+    lineHeight: 17,
+  },
+  instruction: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 8,
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
 });

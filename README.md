@@ -76,3 +76,4 @@ Set `EXPO_PUBLIC_API_URL` before building if you need something other than the d
 
 - Backend must be running for login, register, and lens records.
 - Backend persists data to MongoDB Atlas (`MONGODB_URI` in `server/.env`).
+- Backend persists data to MongoDB Atlas (`MONGODB_URI` in `server/.env`).

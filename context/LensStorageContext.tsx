@@ -62,6 +62,8 @@ export function LensStorageProvider({ children }: { children: React.ReactNode })
           body: JSON.stringify({
             patientId: record.patientId,
             patientName: record.patientName,
+            age: record.age ?? undefined,
+            gender: record.gender ?? undefined,
             hvid: record.hvid,
             diameter: record.diameter,
             baseCurve: record.baseCurve,
@@ -75,6 +77,9 @@ export function LensStorageProvider({ children }: { children: React.ReactNode })
             spectaclePower: record.spectaclePower,
             notes: record.notes,
             savedAt: record.savedAt,
+            fittingType: record.fittingType,
+            od: record.od,
+            os: record.os,
           }),
         });
         setRecords((prev) => [created, ...prev]);

@@ -1,8 +1,11 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Tabs } from 'expo-router';
 import React from 'react';
+import { Platform } from 'react-native';
 
+import { AppHeaderLogo } from '@/components/AppHeaderLogo';
 import Colors from '@/constants/Colors';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { useColorScheme } from '@/components/useColorScheme';
 import { LensStorageProvider } from '@/context/LensStorageContext';
 
@@ -15,15 +18,51 @@ function TabBarIcon(props: {
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const theme = Colors[colorScheme];
 
   return (
     <LensStorageProvider>
       <Tabs
         screenOptions={{
-          tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-          tabBarInactiveTintColor: Colors[colorScheme ?? 'light'].tabIconDefault,
-          headerStyle: { backgroundColor: Colors[colorScheme ?? 'light'].card },
-          headerTintColor: Colors[colorScheme ?? 'light'].text,
+          tabBarActiveTintColor: theme.tint,
+          tabBarInactiveTintColor: theme.tabIconDefault,
+          headerStyle: { backgroundColor: theme.card },
+          headerTintColor: theme.text,
+          headerTitleAlign: 'center',
+          /**
+           * True screen-center title. @react-navigation/elements applies an asymmetric maxWidth
+           * (wider reserved space for left than right), which shifts the title — override it.
+           */
+          headerTitleContainerStyle: {
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            marginHorizontal: 0,
+            marginLeft: 0,
+            marginRight: 0,
+            paddingHorizontal: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
+            maxWidth: '100%',
+            width: '100%',
+          },
+          headerTitleStyle: {
+            textAlign: 'center',
+          },
+          headerLeft: () => <AppHeaderLogo />,
+          headerLeftContainerStyle: {
+            paddingLeft: 12,
+            zIndex: 2,
+            ...Platform.select({ android: { elevation: 6 } }),
+          },
+          headerRight: () => <ThemeToggle />,
+          headerRightContainerStyle: {
+            paddingRight: 12,
+            zIndex: 2,
+            ...Platform.select({ android: { elevation: 6 } }),
+          },
         }}
       >
         <Tabs.Screen
@@ -38,6 +77,14 @@ export default function TabLayout() {
           options={{
             title: 'Lens Details',
             tabBarIcon: ({ color }) => <TabBarIcon name="eye" color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="fitting-assessment"
+          options={{
+            title: 'Fitting Assessment',
+            tabBarLabel: 'Fitting',
+            tabBarIcon: ({ color }) => <TabBarIcon name="clipboard" color={color} />,
           }}
         />
         <Tabs.Screen
