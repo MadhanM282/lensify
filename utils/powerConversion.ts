@@ -54,21 +54,24 @@ export type SpectacleToContactUnifiedResult =
 
 /**
  * Vertex-corrected contact lens power in diopters (full formula for all powers).
+ * Always rounds to the nearest 0.25 D step.
  */
 export function spectacleToContactLens(spectaclePower: number): number {
   const abs = Math.abs(spectaclePower);
+  let contactPower: number;
+
   if (abs <= 4.0) {
-    // Power up to ±4.00: no change needed.
-    return spectaclePower;
+    // Power up to ±4.00: contact power usually matches (no vertex change).
+    contactPower = spectaclePower;
+  } else {
+    // Power above ±4.00: vertex distance correction.
+    const denom = 1 - VERTEX_DISTANCE_M * spectaclePower;
+    if (!Number.isFinite(denom) || Math.abs(denom) < 1e-9) return Number.NaN;
+    contactPower = spectaclePower / denom;
   }
 
-  // Power above ±4.00: vertex distance correction.
-  const denom = 1 - VERTEX_DISTANCE_M * spectaclePower;
-  if (!Number.isFinite(denom) || Math.abs(denom) < 1e-9) return Number.NaN;
-
-  const fContact = spectaclePower / denom;
   // Round to nearest 0.25 D (common lens step)
-  return Math.round(fContact * 4) / 4;
+  return roundToQuarterDiopter(contactPower);
 }
 
 export function formatPower(p: number): string {
@@ -85,7 +88,8 @@ function vertexNoRound(spectaclePower: number): number {
   return spectaclePower / denom;
 }
 
-function roundQuarter(n: number): number {
+/** Nearest 0.25 D step (standard Rx / contact lens granularity). */
+export function roundToQuarterDiopter(n: number): number {
   return Math.round(n * 4) / 4;
 }
 
@@ -111,6 +115,8 @@ function roundSphereTowardZeroQuarter(n: number): number {
  * Rebuild contact Rx in same cyl notation:
  *   SPH_cl = C_axis
  *   CYL_cl = C_perp - C_axis
+ *
+ * All results are rounded to the nearest 0.25 D step.
  */
 export function convertSpectacleRxToContact(
   sphere: number,
@@ -122,8 +128,8 @@ export function convertSpectacleRxToContact(
   const sphereRaw = cAxis;
   const cylRaw = cPerp - cAxis;
   return {
-    sphere: roundSphereTowardZeroQuarter(sphereRaw),
-    cylinder: roundQuarter(cylRaw),
+    sphere: roundToQuarterDiopter(sphereRaw),
+    cylinder: roundToQuarterDiopter(cylRaw),
   };
 }
 

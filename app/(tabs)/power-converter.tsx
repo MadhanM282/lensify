@@ -1,6 +1,7 @@
 import {
   convertSpectacleRxToContactUnified,
   formatPower,
+  roundToQuarterDiopter,
   SPHERICAL_EQUIVALENT_MAX_ABS_CYL,
   toricContactLensPreferredNote,
 } from '@/utils/powerConversion';
@@ -145,7 +146,8 @@ export default function PowerConverterScreen() {
                 <>
                   <Text style={[styles.resultValue, { color: c.primary }]}>{formatPower(converted.contactSphere)} D</Text>
                   <Text style={[styles.seSub, { color: c.placeholder }]}>
-                    Spherical lens (SE rule). SE spectacle = {formatPower(converted.seSpectacle)} D
+                    Spherical lens (SE rule). SE spectacle ={' '}
+                    {formatPower(roundToQuarterDiopter(converted.seSpectacle))} D
                   </Text>
                 </>
               ) : (

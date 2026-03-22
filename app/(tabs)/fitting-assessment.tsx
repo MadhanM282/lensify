@@ -1,7 +1,9 @@
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -130,7 +132,26 @@ function dash(s: string): string {
   return t ? t : '—';
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function buildFittingReportHtml(bodyText: string): string {
+  const escaped = escapeHtml(bodyText);
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<style>
+  body { margin:0; padding:18px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:11pt; line-height:1.45; color:#111; }
+  h1 { font-size:14pt; margin:0 0 14px; font-weight:700; }
+  pre { margin:0; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:10pt; white-space:pre-wrap; word-wrap:break-word; }
+</style></head><body><h1>Contact lens fitting report</h1><pre>${escaped}</pre></body></html>`;
+}
+
 type FittingReportInput = {
+  fittingLensType: 'soft' | 'hard';
   trials: TrialState[];
   finalFit: { od: FinalEyeParams; os: FinalEyeParams };
   dynamicAssessment: { od: DynamicEyeAssessment; os: DynamicEyeAssessment };
@@ -144,6 +165,7 @@ function buildFittingReportPayload(r: FittingReportInput, savedAtIso: string) {
   return {
     version: 1 as const,
     savedAt: savedAtIso,
+    fittingLensType: r.fittingLensType,
     trials: r.trials,
     finalFit: r.finalFit,
     lensAssessment: {
@@ -156,13 +178,8 @@ function buildFittingReportPayload(r: FittingReportInput, savedAtIso: string) {
   };
 }
 
-function buildFittingReportText(r: FittingReportInput): string {
+function fittingReportTrialsLines(r: FittingReportInput): string[] {
   const L: string[] = [];
-  L.push('CONTACT LENS — FITTING REPORT');
-  L.push(`Generated: ${new Date().toLocaleString()}`);
-  L.push('—'.repeat(44));
-  L.push('');
-  L.push('TRIALS');
   r.trials.forEach((t, i) => {
     L.push(`Trial ${i + 1} — Fit: ${fitLabel(t.fitType)}`);
     L.push(
@@ -173,7 +190,11 @@ function buildFittingReportText(r: FittingReportInput): string {
     );
     L.push('');
   });
-  L.push('FINAL FIT PARAMETERS');
+  return L;
+}
+
+function fittingReportFinalFitLines(r: FittingReportInput): string[] {
+  const L: string[] = [];
   (['OD', 'OS'] as const).forEach((label) => {
     const eye = label === 'OD' ? r.finalFit.od : r.finalFit.os;
     L.push(`${label}`);
@@ -183,7 +204,11 @@ function buildFittingReportText(r: FittingReportInput): string {
     L.push(`  Design / type: ${dash(eye.designType)}`);
     L.push('');
   });
-  L.push('LENS FIT — DYNAMIC');
+  return L;
+}
+
+function fittingReportDynamicLines(r: FittingReportInput): string[] {
+  const L: string[] = [];
   (['OD', 'OS'] as const).forEach((label) => {
     const e = label === 'OD' ? r.dynamicAssessment.od : r.dynamicAssessment.os;
     L.push(`${label}`);
@@ -194,7 +219,11 @@ function buildFittingReportText(r: FittingReportInput): string {
     L.push(`  Moment speed: ${dash(e.momentSpeed)}`);
     L.push('');
   });
-  L.push('LENS FIT — STATIC');
+  return L;
+}
+
+function fittingReportStaticLines(r: FittingReportInput): string[] {
+  const L: string[] = [];
   (['OD', 'OS'] as const).forEach((label) => {
     const e = label === 'OD' ? r.staticAssessment.od : r.staticAssessment.os;
     L.push(`${label}`);
@@ -205,6 +234,58 @@ function buildFittingReportText(r: FittingReportInput): string {
     L.push(`  Edge clearance 1 (mm): ${dash(e.edgeClearanceOneMm)} | 2 (mm): ${dash(e.edgeClearanceTwoMm)}`);
     L.push('');
   });
+  return L;
+}
+
+type FittingReportSection = {
+  key: string;
+  title: string;
+  lines: string[];
+};
+
+function getFittingReportSections(r: FittingReportInput): FittingReportSection[] {
+  return [
+    {
+      key: 'summary',
+      title: 'Summary',
+      lines: [
+        `Generated: ${new Date().toLocaleString()}`,
+        '',
+        `Lens type: ${r.fittingLensType === 'soft' ? 'Soft' : 'Hard'} contact lens`,
+      ],
+    },
+    { key: 'trials', title: 'Trials', lines: fittingReportTrialsLines(r) },
+    { key: 'finalFit', title: 'Final fit parameters', lines: fittingReportFinalFitLines(r) },
+    { key: 'dynamic', title: 'Lens fit — dynamic', lines: fittingReportDynamicLines(r) },
+    { key: 'static', title: 'Lens fit — static', lines: fittingReportStaticLines(r) },
+    { key: 'conclusion', title: 'Fit conclusion', lines: [dash(r.fitConclusion)] },
+    {
+      key: 'overRefraction',
+      title: 'Over refraction',
+      lines: [
+        `Predict — DS: ${dash(r.predictOverRefractionDs)}`,
+        `Accurate spherical — DS: ${dash(r.accurateSphericalOverRefractionDs)}`,
+      ],
+    },
+  ];
+}
+
+function buildFittingReportText(r: FittingReportInput): string {
+  const L: string[] = [];
+  L.push('CONTACT LENS — FITTING REPORT');
+  L.push(`Generated: ${new Date().toLocaleString()}`);
+  L.push('—'.repeat(44));
+  L.push('');
+  L.push(`Lens type: ${r.fittingLensType === 'soft' ? 'Soft' : 'Hard'} contact lens`);
+  L.push('');
+  L.push('TRIALS');
+  L.push(...fittingReportTrialsLines(r));
+  L.push('FINAL FIT PARAMETERS');
+  L.push(...fittingReportFinalFitLines(r));
+  L.push('LENS FIT — DYNAMIC');
+  L.push(...fittingReportDynamicLines(r));
+  L.push('LENS FIT — STATIC');
+  L.push(...fittingReportStaticLines(r));
   L.push('FIT CONCLUSION');
   L.push(dash(r.fitConclusion));
   L.push('');
@@ -363,6 +444,7 @@ export default function FittingAssessmentScreen() {
   const c = Colors[colorScheme];
 
   const [topTab, setTopTab] = useState<TopTab>('trials');
+  const [fittingLensType, setFittingLensType] = useState<'soft' | 'hard'>('soft');
   const [trials, setTrials] = useState<TrialState[]>(() =>
     Array.from({ length: TRIAL_COUNT }, () => emptyTrial())
   );
@@ -616,6 +698,7 @@ export default function FittingAssessmentScreen() {
 
   const reportInput: FittingReportInput = useMemo(
     () => ({
+      fittingLensType,
       trials,
       finalFit,
       dynamicAssessment,
@@ -625,6 +708,7 @@ export default function FittingAssessmentScreen() {
       accurateSphericalOverRefractionDs,
     }),
     [
+      fittingLensType,
       trials,
       finalFit,
       dynamicAssessment,
@@ -636,6 +720,7 @@ export default function FittingAssessmentScreen() {
   );
 
   const fullReportText = useMemo(() => buildFittingReportText(reportInput), [reportInput]);
+  const fittingResultSections = useMemo(() => getFittingReportSections(reportInput), [reportInput]);
 
   const fittingValidationErrors = useMemo(
     () => getFittingValidationErrors(reportInput),
@@ -663,9 +748,71 @@ export default function FittingAssessmentScreen() {
     }
   }, [reportInput]);
 
-  const downloadOrShareReport = useCallback(async () => {
+  const downloadReportAsPdf = useCallback(async () => {
     if (!isFittingReportComplete(reportInput)) {
       setResultActionNotice('Fill all required fields in every section before downloading.');
+      setTimeout(() => setResultActionNotice(null), 3500);
+      return;
+    }
+    const text = `${buildFittingReportText(reportInput)}\n\n—\nExported: ${new Date().toISOString()}`;
+    const html = buildFittingReportHtml(text);
+
+    try {
+      if (Platform.OS === 'web') {
+        const printWindow = typeof window !== 'undefined' ? window.open('', '_blank') : null;
+        if (!printWindow) {
+          setResultActionNotice('Allow pop-ups, then try again to print or save as PDF.');
+          setTimeout(() => setResultActionNotice(null), 4000);
+          return;
+        }
+        printWindow.document.write(html);
+        printWindow.document.close();
+        printWindow.focus();
+        setTimeout(() => {
+          printWindow.print();
+          setResultActionNotice('In the print dialog, choose “Save as PDF” to download.');
+          setTimeout(() => setResultActionNotice(null), 4500);
+        }, 300);
+        return;
+      }
+
+      const { uri } = await Print.printToFileAsync({
+        html,
+        margins: { left: 48, right: 48, top: 48, bottom: 48 },
+      });
+      const base = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+      const pdfName = `fitting-report-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.pdf`;
+      let shareUri = uri;
+      if (base) {
+        const outUri = `${base}${pdfName}`;
+        try {
+          await FileSystem.copyAsync({ from: uri, to: outUri });
+          shareUri = outUri;
+        } catch {
+          shareUri = uri;
+        }
+      }
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(shareUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Save fitting report as PDF',
+          ...(Platform.OS === 'ios' ? { UTI: 'com.adobe.pdf' as const } : {}),
+        });
+        setResultActionNotice('Choose “Save to Files” or another app to store the PDF.');
+      } else {
+        setResultActionNotice('Sharing is not available; PDF was created in app cache.');
+      }
+      setTimeout(() => setResultActionNotice(null), 3500);
+    } catch {
+      setResultActionNotice('Could not create PDF.');
+      setTimeout(() => setResultActionNotice(null), 2800);
+    }
+  }, [reportInput]);
+
+  const shareFittingReport = useCallback(async () => {
+    if (!isFittingReportComplete(reportInput)) {
+      setResultActionNotice('Fill all required fields in every section before sharing.');
       setTimeout(() => setResultActionNotice(null), 3500);
       return;
     }
@@ -675,13 +822,13 @@ export default function FittingAssessmentScreen() {
     try {
       if (Platform.OS === 'web') {
         await Share.share({ title: 'Fitting report', message: text });
-        setResultActionNotice('Use your browser or system share options to download or copy.');
+        setResultActionNotice('Use your browser or system share options.');
         setTimeout(() => setResultActionNotice(null), 3500);
         return;
       }
       const base = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
       if (!base) {
-        await Share.share({ message: text });
+        await Share.share({ title: 'Fitting report', message: text });
         return;
       }
       const uri = `${base}${safeName}`;
@@ -690,19 +837,19 @@ export default function FittingAssessmentScreen() {
       if (canShare) {
         await Sharing.shareAsync(uri, {
           mimeType: 'text/plain',
-          dialogTitle: 'Download / share fitting report',
+          dialogTitle: 'Share fitting report',
           ...(Platform.OS === 'ios' ? { UTI: 'public.plain-text' as const } : {}),
         });
-        setResultActionNotice('Choose an app (Files, Drive, Mail…) to save or share.');
+        setResultActionNotice('Choose an app to share the report.');
       } else {
         await Share.share({ title: 'Fitting report', message: text });
       }
       setTimeout(() => setResultActionNotice(null), 3500);
-    } catch (e) {
+    } catch {
       try {
         await Share.share({ title: 'Fitting report', message: text });
       } catch {
-        setResultActionNotice('Could not export report');
+        setResultActionNotice('Could not share report');
         setTimeout(() => setResultActionNotice(null), 2800);
       }
     }
@@ -714,6 +861,32 @@ export default function FittingAssessmentScreen() {
       style={[styles.container, { backgroundColor: c.background }]}
     >
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        <Text style={[styles.label, { color: c.text, marginBottom: 8 }]}>Lens type</Text>
+        <View style={[styles.row, { marginBottom: 14 }]}>
+          <Pressable
+            style={[
+              styles.optionSmall,
+              { borderColor: c.border, backgroundColor: fittingLensType === 'soft' ? c.primary : c.background },
+            ]}
+            onPress={() => setFittingLensType('soft')}
+            accessibilityRole="button"
+            accessibilityState={{ selected: fittingLensType === 'soft' }}
+          >
+            <Text style={[styles.optionText, { color: fittingLensType === 'soft' ? '#fff' : c.text }]}>Soft</Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.optionSmall,
+              { borderColor: c.border, backgroundColor: fittingLensType === 'hard' ? c.primary : c.background },
+            ]}
+            onPress={() => setFittingLensType('hard')}
+            accessibilityRole="button"
+            accessibilityState={{ selected: fittingLensType === 'hard' }}
+          >
+            <Text style={[styles.optionText, { color: fittingLensType === 'hard' ? '#fff' : c.text }]}>Hard</Text>
+          </Pressable>
+        </View>
+
         <View style={[styles.topTabBar, { backgroundColor: c.card, borderColor: c.border }]}>
           {TOP_TABS.map(({ key, label }) => {
             const active = topTab === key;
@@ -1340,72 +1513,124 @@ export default function FittingAssessmentScreen() {
         ) : null}
 
         {topTab === 'result' ? (
-          <View style={[styles.section, { backgroundColor: c.card, borderColor: c.border }]}>
-            <Text style={[styles.sectionTitle, { color: c.text }]}>Fitting result</Text>
-            <Text style={[styles.intro, { color: c.placeholder }]}>
-              The full report appears only when every required field is filled: at least one complete trial (others may
-              be left empty), both eyes in Parameters and Assessment, fit conclusion, and both over-refraction DS
-              values. Save stores data on this device only; Download uses your system share sheet.
-            </Text>
-            {lastSavedResultLabel ? (
-              <Text style={[styles.subLabel, { color: c.placeholder, marginBottom: 10 }]}>
-                Last full report saved on device: {lastSavedResultLabel}
+          <>
+            <View style={[styles.section, { backgroundColor: c.card, borderColor: c.border }]}>
+              <Text style={[styles.sectionTitle, { color: c.text }]}>Fitting result</Text>
+              <Text style={[styles.intro, { color: c.placeholder, marginBottom: 0 }]}>
+                The report preview below is organized by section. It unlocks when every required field is complete: at
+                least one full trial (others may be empty), both eyes in Parameters and Assessment, fit conclusion, and
+                both over-refraction DS values.
               </Text>
-            ) : null}
-
-            <View style={styles.resultActions}>
-              <Pressable
-                disabled={!reportIsComplete}
-                style={({ pressed }) => [
-                  styles.primaryBtn,
-                  styles.resultActionBtn,
-                  { backgroundColor: c.primary, opacity: !reportIsComplete ? 0.45 : 1 },
-                  pressed && reportIsComplete && styles.pressed,
-                ]}
-                onPress={() => void saveFullReportOnDevice()}
-              >
-                <Text style={styles.primaryBtnText}>Save on device</Text>
-              </Pressable>
-              <Pressable
-                disabled={!reportIsComplete}
-                style={({ pressed }) => [
-                  styles.secondaryBtn,
-                  styles.resultActionBtn,
-                  { borderColor: c.primary, opacity: !reportIsComplete ? 0.45 : 1 },
-                  pressed && reportIsComplete && styles.pressed,
-                ]}
-                onPress={() => void downloadOrShareReport()}
-              >
-                <Text style={[styles.secondaryBtnText, { color: c.primary }]}>Download / share</Text>
-              </Pressable>
             </View>
 
-            {resultActionNotice ? (
-              <Text style={[styles.saveNotice, { color: c.primary }]} accessibilityLiveRegion="polite">
-                {resultActionNotice}
+            <View style={[styles.section, styles.resultSectionSpacer, { backgroundColor: c.card, borderColor: c.border }]}>
+              <Text style={[styles.resultSubsectionTitle, { color: c.text }]}>Save and export</Text>
+              <Text style={[styles.resultSubsectionHint, { color: c.placeholder }]}>
+                Save keeps a JSON snapshot on this device. Download builds a PDF (on the web, choose “Save as PDF” in the
+                print dialog). Share opens the plain-text report in your system share sheet.
               </Text>
-            ) : null}
+
+              <View style={styles.resultActions}>
+                <Pressable
+                  disabled={!reportIsComplete}
+                  style={({ pressed }) => [
+                    styles.primaryBtn,
+                    styles.resultActionBtn,
+                    { backgroundColor: c.primary, opacity: !reportIsComplete ? 0.45 : 1 },
+                    pressed && reportIsComplete && styles.pressed,
+                  ]}
+                  onPress={() => void saveFullReportOnDevice()}
+                >
+                  <Text style={styles.primaryBtnText}>Save on device</Text>
+                </Pressable>
+                <View style={styles.resultIconGroup}>
+                  <Pressable
+                    disabled={!reportIsComplete}
+                    accessibilityRole="button"
+                    accessibilityLabel="Download report as PDF"
+                    style={({ pressed }) => [
+                      styles.resultIconBtn,
+                      {
+                        borderColor: c.primary,
+                        backgroundColor: c.background,
+                        opacity: !reportIsComplete ? 0.45 : 1,
+                      },
+                      pressed && reportIsComplete && styles.pressed,
+                    ]}
+                    onPress={() => void downloadReportAsPdf()}
+                  >
+                    <FontAwesome name="download" size={20} color={c.primary} />
+                  </Pressable>
+                  <Pressable
+                    disabled={!reportIsComplete}
+                    accessibilityRole="button"
+                    accessibilityLabel="Share report as text"
+                    style={({ pressed }) => [
+                      styles.resultIconBtn,
+                      {
+                        borderColor: c.primary,
+                        backgroundColor: c.background,
+                        opacity: !reportIsComplete ? 0.45 : 1,
+                      },
+                      pressed && reportIsComplete && styles.pressed,
+                    ]}
+                    onPress={() => void shareFittingReport()}
+                  >
+                    <FontAwesome name="share-alt" size={20} color={c.primary} />
+                  </Pressable>
+                </View>
+              </View>
+
+              {lastSavedResultLabel ? (
+                <Text style={[styles.subLabel, { color: c.placeholder, marginTop: 10, marginBottom: 0 }]}>
+                  Last full report saved on device: {lastSavedResultLabel}
+                </Text>
+              ) : null}
+
+              {resultActionNotice ? (
+                <Text
+                  style={[styles.saveNotice, { color: c.primary, marginTop: lastSavedResultLabel ? 8 : 10 }]}
+                  accessibilityLiveRegion="polite"
+                >
+                  {resultActionNotice}
+                </Text>
+              ) : null}
+            </View>
 
             {!reportIsComplete ? (
-              <View style={[styles.validationPanel, { borderColor: c.border, backgroundColor: c.background }]}>
-                <Text style={[styles.validationPanelTitle, { color: c.text }]}>Complete these to see the report</Text>
-                {fittingValidationErrors.map((msg, idx) => (
-                  <Text key={idx} style={[styles.validationBullet, { color: c.placeholder }]}>
-                    • {msg}
-                  </Text>
-                ))}
+              <View style={[styles.section, styles.resultSectionSpacer, { backgroundColor: c.card, borderColor: c.border }]}>
+                <Text style={[styles.resultSubsectionTitle, { color: c.text }]}>Complete your assessment</Text>
+                <Text style={[styles.resultSubsectionHint, { color: c.placeholder }]}>
+                  Finish these items to unlock the section-by-section report preview and export actions.
+                </Text>
+                <View style={[styles.validationPanel, { borderColor: c.border, backgroundColor: c.background, marginTop: 0 }]}>
+                  <Text style={[styles.validationPanelTitle, { color: c.text }]}>Missing or incomplete</Text>
+                  {fittingValidationErrors.map((msg, idx) => (
+                    <Text key={idx} style={[styles.validationBullet, { color: c.placeholder }]}>
+                      • {msg}
+                    </Text>
+                  ))}
+                </View>
               </View>
             ) : (
-              <>
-                <Text style={[styles.label, { color: c.text }]}>Full report</Text>
-                <View style={[styles.reportBox, { borderColor: c.border, backgroundColor: c.background }]}>
-                  <Text style={[styles.reportText, { color: c.text }]} selectable>
-                    {fullReportText}
-                  </Text>
-                </View>
-              </>
+              <View style={styles.resultSectionSpacer}>
+                <Text style={[styles.resultSubsectionTitle, { color: c.text, marginHorizontal: 2, marginBottom: 12 }]}>
+                  Report preview
+                </Text>
+                {fittingResultSections.map((s) => (
+                  <View
+                    key={s.key}
+                    style={[styles.resultReportSection, { borderColor: c.border, backgroundColor: c.card }]}
+                  >
+                    <Text style={[styles.resultReportSectionTitle, { color: c.primary }]}>{s.title}</Text>
+                    <Text style={[styles.resultReportSectionBody, { color: c.text }]} selectable>
+                      {s.lines.join('\n').trimEnd()}
+                    </Text>
+                  </View>
+                ))}
+              </View>
             )}
-          </View>
+          </>
         ) : null}
       </ScrollView>
     </KeyboardAvoidingView>
@@ -1437,15 +1662,38 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  resultActions: { flexDirection: 'row', gap: 10, marginBottom: 8 },
+  resultActions: { flexDirection: 'row', gap: 10, marginBottom: 8, alignItems: 'center' },
   resultActionBtn: { flex: 1, alignItems: 'center' },
-  reportBox: {
+  resultIconGroup: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  resultIconBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
     borderWidth: 1,
-    borderRadius: 10,
-    padding: 12,
-    marginTop: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  reportText: { fontSize: 12, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: undefined }), lineHeight: 18 },
+  resultSectionSpacer: { marginTop: 14 },
+  resultSubsectionTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
+  resultSubsectionHint: { fontSize: 13, lineHeight: 19, marginBottom: 12 },
+  resultReportSection: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+  },
+  resultReportSectionTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 10,
+  },
+  resultReportSectionBody: {
+    fontSize: 12,
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: undefined }),
+    lineHeight: 18,
+  },
   validationPanel: {
     borderWidth: 1,
     borderRadius: 10,

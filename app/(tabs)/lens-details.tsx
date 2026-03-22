@@ -1,4 +1,16 @@
+import { RequiredStar } from '@/components/RequiredStar';
+import { useColorScheme } from '@/components/useColorScheme';
+import Colors from '@/constants/Colors';
 import { useLensStorage } from '@/context/LensStorageContext';
+import { LENS_COLORS, type EyeLensSide, type LensColor, type PatientGender } from '@/types';
+import {
+  baseCurveFromK1K2,
+  convertSpectacleRxToContactUnified,
+  diameterFromHvidMm,
+  formatPower,
+  roundToQuarterDiopter,
+  toricContactLensPreferredNote
+} from '@/utils/powerConversion';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -11,18 +23,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import Colors from '@/constants/Colors';
-import { RequiredStar } from '@/components/RequiredStar';
-import { useColorScheme } from '@/components/useColorScheme';
-import { LENS_COLORS, type EyeLensSide, type LensColor, type PatientGender } from '@/types';
-import {
-  baseCurveFromK1K2,
-  convertSpectacleRxToContactUnified,
-  diameterFromHvidMm,
-  formatPower,
-  toricContactLensPreferredNote,
-  VERTEX_DISTANCE_M,
-} from '@/utils/powerConversion';
 
 type EyeDetails = {
   hvid: string;
@@ -266,7 +266,7 @@ export default function LensDetailsScreen() {
 
     if (converted.mode === 'spherical_equivalent') {
       setConversionResult(
-        `Spherical CL: ${formatPower(converted.contactSphere)} D  (SE = ${formatPower(sph)} + ½×(${formatPower(cylNum)}) = ${formatPower(converted.seSpectacle)})`
+        `Sph = ${formatPower(roundToQuarterDiopter(converted.seSpectacle))}`
       );
       setConversionHint(
         `|Cylinder| ≤ 0.75 D: spherical equivalent rule applied.\n${vertexNote}`
