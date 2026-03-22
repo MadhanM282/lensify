@@ -25,6 +25,7 @@ export interface ContactLensDetails {
   lensColor?: LensColor;       // Brown, Hazel, Grey, Green, Aqua
   spectaclePower?: string;     // if converted from spectacle
   notes?: string;
+  savedAt?: string;            // ISO timestamp when the lens details were saved
   createdAt: string;
 }
 

@@ -47,6 +47,14 @@ export default function PatientsScreen() {
         <Text style={[styles.label, { color: c.placeholder }]}>DIA</Text>
         <Text style={[styles.value, { color: c.text }]}>{item.diameter || '–'} mm</Text>
       </View>
+      {inferFittingTypeFromHvidAndDia(item.hvid, item.diameter) ? (
+        <View style={styles.row}>
+          <Text style={[styles.label, { color: c.placeholder }]}>Fitting</Text>
+          <Text style={[styles.value, { color: c.text }]}>
+            {inferFittingTypeFromHvidAndDia(item.hvid, item.diameter)}
+          </Text>
+        </View>
+      ) : null}
       <View style={styles.row}>
         <Text style={[styles.label, { color: c.placeholder }]}>BC</Text>
         <Text style={[styles.value, { color: c.text }]}>{item.baseCurve || '–'}</Text>
@@ -75,6 +83,12 @@ export default function PatientsScreen() {
       {item.notes ? (
         <Text style={[styles.notes, { color: c.placeholder }]} numberOfLines={2}>{item.notes}</Text>
       ) : null}
+      {item.savedAt ? (
+        <View style={styles.row}>
+          <Text style={[styles.label, { color: c.placeholder }]}>Saved</Text>
+          <Text style={[styles.value, { color: c.text }]}>{new Date(item.savedAt).toLocaleString()}</Text>
+        </View>
+      ) : null}
     </View>
   );
 
@@ -102,6 +116,18 @@ export default function PatientsScreen() {
       )}
     </View>
   );
+}
+
+function inferFittingTypeFromHvidAndDia(hvid: string | undefined, diameter: string | undefined) {
+  const h = hvid ? parseFloat(hvid.replace(',', '.')) : NaN;
+  const d = diameter ? parseFloat(diameter.replace(',', '.')) : NaN;
+  if (!Number.isFinite(h) || !Number.isFinite(d)) return null;
+
+  // We stored diameter with `toFixed(1)`, so small float differences are possible.
+  const epsilon = 0.25;
+  if (Math.abs(d - (h + 2)) <= epsilon) return 'Soft';
+  if (Math.abs(d - (h - 2)) <= epsilon) return 'Hard';
+  return null;
 }
 
 const styles = StyleSheet.create({

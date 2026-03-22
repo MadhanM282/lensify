@@ -3,6 +3,7 @@ import { useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,19 +17,40 @@ export default function PowerConverterScreen() {
   const [sphere, setSphere] = useState('');
   const [cylinder, setCylinder] = useState('');
   const [axis, setAxis] = useState('');
+  const [converted, setConverted] = useState<{ sphere: number; cylinder: number } | null>(null);
+  const [error, setError] = useState('');
   const colorScheme = useColorScheme() ?? 'light';
   const c = Colors[colorScheme];
 
   const parse = (v: string) => (v.trim() === '' ? null : parseFloat(v.replace(',', '.')));
-  const sph = parse(sphere);
-  const hasSphere = sph !== null && !Number.isNaN(sph);
-  const cyl = parse(cylinder);
-  const hasValidCylinder = cyl === null || !Number.isNaN(cyl);
-  const converted = hasSphere && hasValidCylinder ? convertSpectacleRxToContact(sph!, cyl ?? 0) : null;
-  const conversionFailed = hasSphere && (!hasValidCylinder || !converted);
-  const clSphere = converted?.sphere ?? null;
-  const clCylinder = converted?.cylinder ?? null;
+
+  const handleConvert = () => {
+    setError('');
+    setConverted(null);
+    
+    const sph = parse(sphere);
+    if (sph === null || Number.isNaN(sph)) {
+      setError('Please enter a valid sphere value.');
+      return;
+    }
+    
+    const cyl = parse(cylinder);
+    if (cyl !== null && Number.isNaN(cyl)) {
+      setError('Please enter a valid cylinder value.');
+      return;
+    }
+
+    const result = convertSpectacleRxToContact(sph, cyl ?? 0);
+    if (!result) {
+      setError('Cannot convert. The power value may be too extreme.');
+      return;
+    }
+
+    setConverted(result);
+  };
+
   const axisPart = axis.trim() ? ` x ${axis.trim()}` : '';
+
 
   return (
     <KeyboardAvoidingView
@@ -77,12 +99,19 @@ export default function PowerConverterScreen() {
             keyboardType="decimal-pad"
           />
 
-          {conversionFailed ? <Text style={[styles.errorBox, { color: '#dc2626' }]}>Cannot convert.</Text> : null}
-          {hasSphere && clSphere !== null && clCylinder !== null && !conversionFailed ? (
+          <Pressable
+            style={({ pressed }) => [styles.button, { backgroundColor: c.primary }, pressed && styles.buttonPressed]}
+            onPress={handleConvert}
+          >
+            <Text style={styles.buttonText}>Convert to Contact Lens</Text>
+          </Pressable>
+
+          {error ? <Text style={[styles.errorBox, { color: '#dc2626' }]}>{error}</Text> : null}
+          {converted ? (
             <View style={[styles.result, { backgroundColor: c.background, borderColor: c.primary }]}>
               <Text style={[styles.resultLabel, { color: c.text }]}>Contact lens power</Text>
               <Text style={[styles.resultValue, { color: c.primary }]}>
-                {formatPower(clSphere)} / {formatPower(clCylinder)}
+                {formatPower(converted.sphere)} / {formatPower(converted.cylinder)}
                 {axisPart}
               </Text>
             </View>
@@ -129,6 +158,15 @@ const styles = StyleSheet.create({
     padding: 14,
     fontSize: 18,
   },
+  button: {
+    borderRadius: 10,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 16,
+  },
+  buttonPressed: { opacity: 0.85 },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   result: {
     marginTop: 20,
     borderRadius: 10,

@@ -74,6 +74,7 @@ export function LensStorageProvider({ children }: { children: React.ReactNode })
             lensColor: record.lensColor ?? undefined,
             spectaclePower: record.spectaclePower,
             notes: record.notes,
+            savedAt: record.savedAt,
           }),
         });
         setRecords((prev) => [created, ...prev]);

@@ -85,13 +85,25 @@ export function convertSpectacleRxToContact(
   };
 }
 
-/** Base curve: (K1 + K2) / 2 − 1 */
-export function baseCurveFromK1K2(k1: number, k2: number): number {
-  return (k1 + k2) / 2 - 1;
+/** Base curve depends on contact lens fitting type.
+ *
+ * Hard: DIA = HVID − 2, BC = (K1 + K2) / 2 − 1
+ * Soft: DIA = HVID + 2, BC = (K1 + K2) / 2 + 1
+ */
+export function baseCurveFromK1K2(
+  k1: number,
+  k2: number,
+  fittingType: 'soft' | 'hard' = 'hard'
+): number {
+  const avg = (k1 + k2) / 2;
+  return fittingType === 'soft' ? avg + 1 : avg - 1;
 }
 
-/** Diameter (mm) = HVID (mm) − 2 */
-export function diameterFromHvidMm(hvidMm: number): number | null {
+/** Diameter (mm) depends on contact lens fitting type. */
+export function diameterFromHvidMm(
+  hvidMm: number,
+  fittingType: 'soft' | 'hard' = 'hard'
+): number | null {
   if (!Number.isFinite(hvidMm)) return null;
-  return hvidMm - 2;
+  return fittingType === 'soft' ? hvidMm + 2 : hvidMm - 2;
 }

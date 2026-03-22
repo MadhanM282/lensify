@@ -22,33 +22,78 @@ import {
   VERTEX_DISTANCE_M,
 } from '@/utils/powerConversion';
 
+type EyeDetails = {
+  hvid: string;
+  diameter: string;
+  k1: string;
+  k2: string;
+  baseCurve: string;
+  sphere: string;
+  cylinder: string;
+  axis: string;
+  lensType: 'clear' | 'tint';
+  lensColor: LensColor | '';
+  notes: string;
+};
+
 export default function LensDetailsScreen() {
   const { addRecord } = useLensStorage();
   const [patientName, setPatientName] = useState('');
-  const [hvid, setHvid] = useState('');
-  const [diameter, setDiameter] = useState('');
-  const [k1, setK1] = useState('');
-  const [k2, setK2] = useState('');
-  const [baseCurve, setBaseCurve] = useState('');
-  const [sphere, setSphere] = useState('');
-  const [cylinder, setCylinder] = useState('');
-  const [axis, setAxis] = useState('');
+  const [gender, setGender] = useState<'male' | 'female' | 'other' | ''>('');
+  const [age, setAge] = useState('');
+  const [lensType, setLensType] = useState<'soft' | 'hard' | null>(null);
+  const [selectedEye, setSelectedEye] = useState<'right' | 'left' | null>(null);
+  const [eyeDetails, setEyeDetails] = useState<{ right: EyeDetails; left: EyeDetails }>({
+    right: {
+      hvid: '',
+      diameter: '',
+      k1: '',
+      k2: '',
+      baseCurve: '',
+      sphere: '',
+      cylinder: '',
+      axis: '',
+      lensType: 'clear',
+      lensColor: '',
+      notes: '',
+    },
+    left: {
+      hvid: '',
+      diameter: '',
+      k1: '',
+      k2: '',
+      baseCurve: '',
+      sphere: '',
+      cylinder: '',
+      axis: '',
+      lensType: 'clear',
+      lensColor: '',
+      notes: '',
+    },
+  });
   const [conversionResult, setConversionResult] = useState('');
   const [conversionError, setConversionError] = useState('');
-  const [lensType, setLensType] = useState<'clear' | 'tint'>('clear');
-  const [lensColor, setLensColor] = useState<LensColor | ''>('');
-  const [notes, setNotes] = useState('');
   const colorScheme = useColorScheme() ?? 'light';
   const c = Colors[colorScheme];
 
+  const currentEyeData = selectedEye ? eyeDetails[selectedEye] : null;
+
+  const updateEyeDetail = <K extends keyof EyeDetails>(key: K, value: EyeDetails[K]) => {
+    if (!selectedEye) return;
+    setEyeDetails((prev) => ({
+      ...prev,
+      [selectedEye]: { ...prev[selectedEye], [key]: value },
+    }));
+  };
+
   const handleHvidChange = (text: string) => {
-    setHvid(text);
+    updateEyeDetail('hvid', text);
     const n = parseFloat(text.replace(',', '.'));
     if (!Number.isNaN(n)) {
       const dia = diameterFromHvidMm(n);
-      setDiameter(dia !== null ? dia.toFixed(1) : '');
+      updateEyeDetail('diameter', dia !== null ? dia.toFixed(1) : '');
     } else if (text.trim() === '') {
-      setDiameter('');
+      updateEyeDetail('diameter', '');
     }
   };
 
@@ -57,30 +102,30 @@ export default function LensDetailsScreen() {
     const y = parseFloat(b.replace(',', '.'));
     if (Number.isNaN(x) || Number.isNaN(y)) return;
     const bc = baseCurveFromK1K2(x, y);
-    // Your protocol expects (K1+K2)/2 - 1 then rounded to nearest whole.
-    if (Number.isFinite(bc)) setBaseCurve(Math.round(bc).toFixed(0));
+    if (Number.isFinite(bc)) updateEyeDetail('baseCurve', Math.round(bc).toFixed(0));
   };
 
   const handleK1Change = (text: string) => {
-    setK1(text);
-    updateBaseCurveFromK(text, k2);
+    updateEyeDetail('k1', text);
+    updateBaseCurveFromK(text, currentEyeData?.k2 || '');
   };
 
   const handleK2Change = (text: string) => {
-    setK2(text);
-    updateBaseCurveFromK(k1, text);
+    updateEyeDetail('k2', text);
+    updateBaseCurveFromK(currentEyeData?.k1 || '', text);
   };
 
   const handleConvertToContactLens = () => {
+    if (!currentEyeData) return;
     setConversionError('');
     setConversionResult('');
 
-    const sph = parseFloat(sphere.replace(',', '.'));
+    const sph = parseFloat(currentEyeData.sphere.replace(',', '.'));
     if (Number.isNaN(sph)) {
       setConversionError('Enter a valid sphere value.');
       return;
     }
-    const cylNum = cylinder.trim() === '' ? 0 : parseFloat(cylinder.replace(',', '.'));
+    const cylNum = currentEyeData.cylinder.trim() === '' ? 0 : parseFloat(currentEyeData.cylinder.replace(',', '.'));
     if (Number.isNaN(cylNum)) {
       setConversionError('Enter a valid cylinder value.');
       return;
@@ -92,25 +137,46 @@ export default function LensDetailsScreen() {
       return;
     }
 
-    const axisValue = axis.trim() === '' ? '0' : axis.trim();
+    const axisValue = currentEyeData.axis.trim() === '' ? '0' : currentEyeData.axis.trim();
     setConversionResult(`${formatPower(converted.sphere)} / ${formatPower(converted.cylinder)} x ${axisValue}`);
   };
 
   const clearForm = () => {
     setPatientName('');
-    setHvid('');
-    setDiameter('');
-    setK1('');
-    setK2('');
-    setBaseCurve('');
-    setSphere('');
-    setCylinder('');
-    setAxis('');
+    setGender('');
+    setAge('');
+    setLensType(null);
+    setSelectedEye(null);
+    setEyeDetails({
+      right: {
+        hvid: '',
+        diameter: '',
+        k1: '',
+        k2: '',
+        baseCurve: '',
+        sphere: '',
+        cylinder: '',
+        axis: '',
+        lensType: 'clear',
+        lensColor: '',
+        notes: '',
+      },
+      left: {
+        hvid: '',
+        diameter: '',
+        k1: '',
+        k2: '',
+        baseCurve: '',
+        sphere: '',
+        cylinder: '',
+        axis: '',
+        lensType: 'clear',
+        lensColor: '',
+        notes: '',
+      },
+    });
     setConversionResult('');
     setConversionError('');
-    setLensType('clear');
-    setLensColor('');
-    setNotes('');
   };
 
   const handleSave = async () => {
@@ -119,41 +185,48 @@ export default function LensDetailsScreen() {
       Alert.alert('Required', 'Please enter patient name.');
       return;
     }
-    if (!sphere.trim()) {
-      Alert.alert('Required', 'Please enter spherical power.');
-      return;
-    }
 
-    const sphereNum = parseFloat(sphere.replace(',', '.'));
-    if (Number.isNaN(sphereNum)) {
-      Alert.alert('Required', 'Please enter a valid spherical power.');
+    const eyesToSave = [];
+    if (eyeDetails.right.sphere.trim()) eyesToSave.push({ eye: 'right', data: eyeDetails.right });
+    if (eyeDetails.left.sphere.trim()) eyesToSave.push({ eye: 'left', data: eyeDetails.left });
+
+    if (eyesToSave.length === 0) {
+      Alert.alert('Required', 'Please enter spherical power for at least one eye.');
       return;
     }
-    const computedPowerType: 'minus' | 'plus' = sphereNum < 0 ? 'minus' : 'plus';
 
     try {
-      await addRecord({
-        patientId: 'p-' + Date.now(),
-        patientName: name,
-        hvid: hvid.trim() || '',
-        diameter: diameter.trim() || '',
-        baseCurve: baseCurve.trim() || '',
-        power: sphere.trim(), // backend compatibility
-        powerType: computedPowerType, // backend compatibility
-        sphere: sphere.trim(),
-        cylinder: cylinder.trim() || undefined,
-        axis: axis.trim() || undefined,
-        lensType: lensType === 'clear' ? undefined : lensType,
-        lensColor: lensColor || undefined,
-        notes: notes.trim() || undefined,
-      });
+      for (const { eye, data } of eyesToSave) {
+        const sphereNum = parseFloat(data.sphere.replace(',', '.'));
+        if (Number.isNaN(sphereNum)) {
+          Alert.alert('Required', `Please enter a valid spherical power for ${eye} eye.`);
+          return;
+        }
+        const computedPowerType: 'minus' | 'plus' = sphereNum < 0 ? 'minus' : 'plus';
+
+        await addRecord({
+          patientId: 'p-' + Date.now() + '-' + eye,
+          patientName: name + ' (' + (eye === 'right' ? 'R' : 'L') + ')',
+          hvid: data.hvid.trim() || '',
+          diameter: data.diameter.trim() || '',
+          baseCurve: data.baseCurve.trim() || '',
+          power: data.sphere.trim(),
+          powerType: computedPowerType,
+          sphere: data.sphere.trim(),
+          cylinder: data.cylinder.trim() || undefined,
+          axis: data.axis.trim() || undefined,
+          lensType: data.lensType === 'clear' ? undefined : data.lensType,
+          lensColor: data.lensColor || undefined,
+          notes: data.notes.trim() || undefined,
+          savedAt: new Date().toISOString(),
+        });
+      }
       clearForm();
       Alert.alert('Saved', 'Contact lens details have been saved.');
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save. Is the server running?');
     }
   };
-
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -172,52 +245,163 @@ export default function LensDetailsScreen() {
             onChangeText={setPatientName}
           />
 
-          <Text style={[styles.label, { color: c.text }]}>HVID</Text>
+          <Text style={[styles.label, { color: c.text }]}>Gender</Text>
+          <View style={styles.row}>
+            <Pressable
+              style={[
+                styles.optionSmall,
+                { borderColor: c.border, backgroundColor: gender === 'male' ? c.primary : c.background },
+              ]}
+              onPress={() => setGender('male')}
+            >
+              <Text style={[styles.optionText, { color: gender === 'male' ? '#fff' : c.text }]}>Male</Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.optionSmall,
+                { borderColor: c.border, backgroundColor: gender === 'female' ? c.primary : c.background },
+              ]}
+              onPress={() => setGender('female')}
+            >
+              <Text style={[styles.optionText, { color: gender === 'female' ? '#fff' : c.text }]}>Female</Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.optionSmall,
+                { borderColor: c.border, backgroundColor: gender === 'other' ? c.primary : c.background },
+              ]}
+              onPress={() => setGender('other')}
+            >
+              <Text style={[styles.optionText, { color: gender === 'other' ? '#fff' : c.text }]}>Other</Text>
+            </Pressable>
+          </View>
+
+          <Text style={[styles.label, { color: c.text }]}>Age</Text>
           <TextInput
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
-            placeholder=""
+            placeholder="Enter age"
             placeholderTextColor={c.placeholder}
-            value={hvid}
-            onChangeText={handleHvidChange}
+            value={age}
+            onChangeText={setAge}
+            keyboardType="number-pad"
+          />
+
+          <Text style={[styles.label, { color: c.text }]}>Lens type *</Text>
+          <View style={styles.row}>
+            <Pressable
+              style={[
+                styles.optionSmall,
+                { borderColor: c.border, backgroundColor: lensType === 'soft' ? c.primary : c.background },
+              ]}
+              onPress={() => setLensType('soft')}
+            >
+              <Text style={[styles.optionText, { color: lensType === 'soft' ? '#fff' : c.text }]}>Soft</Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.optionSmall,
+                { borderColor: c.border, backgroundColor: lensType === 'hard' ? c.primary : c.background },
+              ]}
+              onPress={() => setLensType('hard')}
+            >
+              <Text style={[styles.optionText, { color: lensType === 'hard' ? '#fff' : c.text }]}>Hard</Text>
+            </Pressable>
+          </View>
+
+          <Text style={[styles.label, { color: c.text }]}>Eye *</Text>
+          <View style={styles.row}>
+            <Pressable
+              style={[
+                styles.optionSmall,
+                { borderColor: c.border, backgroundColor: selectedEye === 'right' ? c.primary : c.background },
+              ]}
+              onPress={() => setSelectedEye('right')}
+            >
+              <Text style={[styles.optionText, { color: selectedEye === 'right' ? '#fff' : c.text }]}>Right Eye (OD)</Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.optionSmall,
+                { borderColor: c.border, backgroundColor: selectedEye === 'left' ? c.primary : c.background },
+              ]}
+              onPress={() => setSelectedEye('left')}
+            >
+              <Text style={[styles.optionText, { color: selectedEye === 'left' ? '#fff' : c.text }]}>Left Eye (OS)</Text>
+            </Pressable>
+          </View>
+
+          <Text style={[styles.label, { color: c.text }]}>HVID</Text>
+          <TextInput
+            key={`hvid-${selectedEye}`}
+            style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
+            placeholder="Enter HVID"
+            placeholderTextColor={c.placeholder}
+            value={selectedEye ? eyeDetails[selectedEye].hvid : ''}
+            onChangeText={(text) => {
+              if (!selectedEye) {
+                Alert.alert('Required', 'Please select Right Eye (OD) or Left Eye (OS) first.');
+                return;
+              }
+              handleHvidChange(text);
+            }}
             keyboardType="decimal-pad"
+            editable={true}
           />
 
           <Text style={[styles.label, { color: c.text }]}>Diameter</Text>
           <TextInput
+            key={`diameter-${selectedEye}`}
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
-            placeholder=""
+            placeholder="Auto-calculated from HVID"
             placeholderTextColor={c.placeholder}
-            value={diameter}
-            onChangeText={setDiameter}
+            value={selectedEye ? eyeDetails[selectedEye].diameter : ''}
+            onChangeText={(text) => {
+              if (selectedEye) updateEyeDetail('diameter', text);
+            }}
             keyboardType="decimal-pad"
+            editable={true}
           />
 
           <Text style={[styles.label, { color: c.text }]}>K1</Text>
           <TextInput
+            key={`k1-${selectedEye}`}
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
-            placeholder=""
+            placeholder="Enter K1"
             placeholderTextColor={c.placeholder}
-            value={k1}
-            onChangeText={handleK1Change}
+            value={selectedEye ? eyeDetails[selectedEye].k1 : ''}
+            onChangeText={(text) => {
+              if (selectedEye) handleK1Change(text);
+            }}
             keyboardType="decimal-pad"
+            editable={true}
           />
+
           <Text style={[styles.label, { color: c.text }]}>K2</Text>
           <TextInput
+            key={`k2-${selectedEye}`}
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
-            placeholder=""
+            placeholder="Enter K2"
             placeholderTextColor={c.placeholder}
-            value={k2}
-            onChangeText={handleK2Change}
+            value={selectedEye ? eyeDetails[selectedEye].k2 : ''}
+            onChangeText={(text) => {
+              if (selectedEye) handleK2Change(text);
+            }}
             keyboardType="decimal-pad"
+            editable={true}
           />
+
           <Text style={[styles.label, { color: c.text }]}>Base curve</Text>
           <TextInput
+            key={`baseCurve-${selectedEye}`}
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
-            placeholder=""
+            placeholder="Auto-calculated from K1 & K2"
             placeholderTextColor={c.placeholder}
-            value={baseCurve}
-            onChangeText={setBaseCurve}
+            value={selectedEye ? eyeDetails[selectedEye].baseCurve : ''}
+            onChangeText={(text) => {
+              if (selectedEye) updateEyeDetail('baseCurve', text);
+            }}
             keyboardType="decimal-pad"
+            editable={true}
           />
 
           <Text style={[styles.label, { color: c.text }]}>Lens type</Text>
@@ -225,24 +409,24 @@ export default function LensDetailsScreen() {
             <Pressable
               style={[
                 styles.optionSmall,
-                { borderColor: c.border, backgroundColor: lensType === 'clear' ? c.primary : c.background },
+                { borderColor: c.border, backgroundColor: selectedEye && eyeDetails[selectedEye].lensType === 'clear' ? c.primary : c.background },
               ]}
-              onPress={() => { setLensType('clear'); setLensColor(''); }}
+              onPress={() => { if (selectedEye) { updateEyeDetail('lensType', 'clear'); updateEyeDetail('lensColor', ''); } }}
             >
-              <Text style={[styles.optionText, { color: lensType === 'clear' ? '#fff' : c.text }]}>Clear</Text>
+              <Text style={[styles.optionText, { color: selectedEye && eyeDetails[selectedEye].lensType === 'clear' ? '#fff' : c.text }]}>Clear</Text>
             </Pressable>
             <Pressable
               style={[
                 styles.optionSmall,
-                { borderColor: c.border, backgroundColor: lensType === 'tint' ? c.primary : c.background },
+                { borderColor: c.border, backgroundColor: selectedEye && eyeDetails[selectedEye].lensType === 'tint' ? c.primary : c.background },
               ]}
-              onPress={() => setLensType('tint')}
+              onPress={() => { if (selectedEye) updateEyeDetail('lensType', 'tint'); }}
             >
-              <Text style={[styles.optionText, { color: lensType === 'tint' ? '#fff' : c.text }]}>Tint</Text>
+              <Text style={[styles.optionText, { color: selectedEye && eyeDetails[selectedEye].lensType === 'tint' ? '#fff' : c.text }]}>Tint</Text>
             </Pressable>
           </View>
 
-          {lensType === 'tint' && (
+          {selectedEye && eyeDetails[selectedEye].lensType === 'tint' && (
             <>
               <Text style={[styles.label, { color: c.text }]}>Color</Text>
               <View style={styles.colorRow}>
@@ -251,11 +435,11 @@ export default function LensDetailsScreen() {
                     key={color}
                     style={[
                       styles.colorOption,
-                      { borderColor: c.border, backgroundColor: lensColor === color ? c.primary : c.background },
+                      { borderColor: c.border, backgroundColor: eyeDetails[selectedEye].lensColor === color ? c.primary : c.background },
                     ]}
-                    onPress={() => setLensColor(color)}
+                    onPress={() => updateEyeDetail('lensColor', color)}
                   >
-                    <Text style={[styles.colorOptionText, { color: lensColor === color ? '#fff' : c.text }]}>
+                    <Text style={[styles.colorOptionText, { color: eyeDetails[selectedEye].lensColor === color ? '#fff' : c.text }]}>
                       {color}
                     </Text>
                   </Pressable>
@@ -266,32 +450,44 @@ export default function LensDetailsScreen() {
 
           <Text style={[styles.label, { color: c.text }]}>Spherical (sphere) *</Text>
           <TextInput
+            key={`sphere-${selectedEye}`}
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
-            placeholder=""
+            placeholder="Enter sphere value"
             placeholderTextColor={c.placeholder}
-            value={sphere}
-            onChangeText={setSphere}
+            value={selectedEye ? eyeDetails[selectedEye].sphere : ''}
+            onChangeText={(text) => {
+              if (selectedEye) updateEyeDetail('sphere', text);
+            }}
             keyboardType="decimal-pad"
+            editable={true}
           />
 
           <Text style={[styles.label, { color: c.text }]}>Cylindrical (cyl)</Text>
           <TextInput
+            key={`cylinder-${selectedEye}`}
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
-            placeholder=""
+            placeholder="Enter cylinder value"
             placeholderTextColor={c.placeholder}
-            value={cylinder}
-            onChangeText={setCylinder}
+            value={selectedEye ? eyeDetails[selectedEye].cylinder : ''}
+            onChangeText={(text) => {
+              if (selectedEye) updateEyeDetail('cylinder', text);
+            }}
             keyboardType="decimal-pad"
+            editable={true}
           />
 
           <Text style={[styles.label, { color: c.text }]}>Axis</Text>
           <TextInput
+            key={`axis-${selectedEye}`}
             style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
-            placeholder=""
+            placeholder="Enter axis (0-180)"
             placeholderTextColor={c.placeholder}
-            value={axis}
-            onChangeText={setAxis}
+            value={selectedEye ? eyeDetails[selectedEye].axis : ''}
+            onChangeText={(text) => {
+              if (selectedEye) updateEyeDetail('axis', text);
+            }}
             keyboardType="decimal-pad"
+            editable={true}
           />
 
           <View style={styles.convertRow}>
@@ -320,12 +516,16 @@ export default function LensDetailsScreen() {
 
           <Text style={[styles.label, { color: c.text }]}>Notes</Text>
           <TextInput
+            key={`notes-${selectedEye}`}
             style={[styles.input, styles.notesInput, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
-            placeholder=""
+            placeholder="Enter any additional notes"
             placeholderTextColor={c.placeholder}
-            value={notes}
-            onChangeText={setNotes}
+            value={selectedEye ? eyeDetails[selectedEye].notes : ''}
+            onChangeText={(text) => {
+              if (selectedEye) updateEyeDetail('notes', text);
+            }}
             multiline
+            editable={true}
           />
 
           <Pressable
