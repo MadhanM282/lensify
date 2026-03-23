@@ -150,15 +150,17 @@ function buildFittingReportHtml(bodyText: string): string {
 </style></head><body><h1>Contact lens fitting report</h1><pre>${escaped}</pre></body></html>`;
 }
 
+type EyeKeyedStrings = { od: string; os: string };
+
 type FittingReportInput = {
   fittingLensType: 'soft' | 'hard';
   trials: TrialState[];
   finalFit: { od: FinalEyeParams; os: FinalEyeParams };
   dynamicAssessment: { od: DynamicEyeAssessment; os: DynamicEyeAssessment };
   staticAssessment: { od: StaticEyeAssessment; os: StaticEyeAssessment };
-  fitConclusion: string;
-  predictOverRefractionDs: string;
-  accurateSphericalOverRefractionDs: string;
+  fitConclusion: EyeKeyedStrings;
+  predictOverRefractionDs: EyeKeyedStrings;
+  accurateSphericalOverRefractionDs: EyeKeyedStrings;
 };
 
 function buildFittingReportPayload(r: FittingReportInput, savedAtIso: string) {
@@ -237,6 +239,29 @@ function fittingReportStaticLines(r: FittingReportInput): string[] {
   return L;
 }
 
+function fittingReportConclusionLines(r: FittingReportInput): string[] {
+  const L: string[] = [];
+  (['OD', 'OS'] as const).forEach((label) => {
+    const key = label === 'OD' ? 'od' : 'os';
+    L.push(`${label}`);
+    L.push(`  ${dash(r.fitConclusion[key])}`);
+    L.push('');
+  });
+  return L;
+}
+
+function fittingReportOverRefractionLines(r: FittingReportInput): string[] {
+  const L: string[] = [];
+  (['OD', 'OS'] as const).forEach((label) => {
+    const key = label === 'OD' ? 'od' : 'os';
+    L.push(`${label}`);
+    L.push(`  Predict — DS: ${dash(r.predictOverRefractionDs[key])}`);
+    L.push(`  Accurate spherical — DS: ${dash(r.accurateSphericalOverRefractionDs[key])}`);
+    L.push('');
+  });
+  return L;
+}
+
 type FittingReportSection = {
   key: string;
   title: string;
@@ -258,15 +283,8 @@ function getFittingReportSections(r: FittingReportInput): FittingReportSection[]
     { key: 'finalFit', title: 'Final fit parameters', lines: fittingReportFinalFitLines(r) },
     { key: 'dynamic', title: 'Lens fit — dynamic', lines: fittingReportDynamicLines(r) },
     { key: 'static', title: 'Lens fit — static', lines: fittingReportStaticLines(r) },
-    { key: 'conclusion', title: 'Fit conclusion', lines: [dash(r.fitConclusion)] },
-    {
-      key: 'overRefraction',
-      title: 'Over refraction',
-      lines: [
-        `Predict — DS: ${dash(r.predictOverRefractionDs)}`,
-        `Accurate spherical — DS: ${dash(r.accurateSphericalOverRefractionDs)}`,
-      ],
-    },
+    { key: 'conclusion', title: 'Fit conclusion', lines: fittingReportConclusionLines(r) },
+    { key: 'overRefraction', title: 'Over refraction', lines: fittingReportOverRefractionLines(r) },
   ];
 }
 
@@ -287,11 +305,9 @@ function buildFittingReportText(r: FittingReportInput): string {
   L.push('LENS FIT — STATIC');
   L.push(...fittingReportStaticLines(r));
   L.push('FIT CONCLUSION');
-  L.push(dash(r.fitConclusion));
-  L.push('');
+  L.push(...fittingReportConclusionLines(r));
   L.push('OVER REFRACTION');
-  L.push(`Predict — DS: ${dash(r.predictOverRefractionDs)}`);
-  L.push(`Accurate spherical — DS: ${dash(r.accurateSphericalOverRefractionDs)}`);
+  L.push(...fittingReportOverRefractionLines(r));
   return L.join('\n');
 }
 
@@ -387,9 +403,9 @@ function getFinalFitValidationErrors(finalFit: { od: FinalEyeParams; os: FinalEy
 function getLensAssessmentValidationErrors(
   dynamicAssessment: { od: DynamicEyeAssessment; os: DynamicEyeAssessment },
   staticAssessment: { od: StaticEyeAssessment; os: StaticEyeAssessment },
-  fitConclusion: string,
-  predictOverRefractionDs: string,
-  accurateSphericalOverRefractionDs: string
+  fitConclusion: EyeKeyedStrings,
+  predictOverRefractionDs: EyeKeyedStrings,
+  accurateSphericalOverRefractionDs: EyeKeyedStrings
 ): string[] {
   const errors: string[] = [];
   (['OD', 'OS'] as const).forEach((label) => {
@@ -408,15 +424,18 @@ function getLensAssessmentValidationErrors(
       );
     }
   });
-  if (!filled(fitConclusion)) {
-    errors.push('Assessment: fit conclusion is required.');
-  }
-  if (!filled(predictOverRefractionDs)) {
-    errors.push('Assessment: predict over refraction (DS) is required.');
-  }
-  if (!filled(accurateSphericalOverRefractionDs)) {
-    errors.push('Assessment: accurate spherical over refraction (DS) is required.');
-  }
+  (['od', 'os'] as const).forEach((eye) => {
+    const label = eye === 'od' ? 'OD' : 'OS';
+    if (!filled(fitConclusion[eye])) {
+      errors.push(`Assessment — Static (${label}): fit conclusion is required.`);
+    }
+    if (!filled(predictOverRefractionDs[eye])) {
+      errors.push(`Assessment — Static (${label}): predict over refraction (DS) is required.`);
+    }
+    if (!filled(accurateSphericalOverRefractionDs[eye])) {
+      errors.push(`Assessment — Static (${label}): accurate spherical over refraction (DS) is required.`);
+    }
+  });
   return errors;
 }
 
@@ -467,12 +486,16 @@ export default function FittingAssessmentScreen() {
     os: StaticEyeAssessment;
   }>(() => ({ od: emptyStaticEye(), os: emptyStaticEye() }));
   const [assessmentSaveNotice, setAssessmentSaveNotice] = useState<string | null>(null);
-  const [fitConclusion, setFitConclusion] = useState('');
-  const [predictOverRefractionDs, setPredictOverRefractionDs] = useState('');
-  const [accurateSphericalOverRefractionDs, setAccurateSphericalOverRefractionDs] = useState('');
+  const [fitConclusionByEye, setFitConclusionByEye] = useState<EyeKeyedStrings>(() => ({ od: '', os: '' }));
+  const [predictOverRefractionDsByEye, setPredictOverRefractionDsByEye] = useState<EyeKeyedStrings>(() => ({
+    od: '',
+    os: '',
+  }));
+  const [accurateSphericalOverRefractionDsByEye, setAccurateSphericalOverRefractionDsByEye] =
+    useState<EyeKeyedStrings>(() => ({ od: '', os: '' }));
   const [overRefractionSnapshot, setOverRefractionSnapshot] = useState<{
-    predict: string;
-    accurate: string;
+    od: { predict: string; accurate: string };
+    os: { predict: string; accurate: string };
   } | null>(null);
   const [resultActionNotice, setResultActionNotice] = useState<string | null>(null);
   const [lastSavedResultLabel, setLastSavedResultLabel] = useState<string | null>(null);
@@ -515,9 +538,9 @@ export default function FittingAssessmentScreen() {
             const p = JSON.parse(lensRaw) as {
               dynamic?: { od?: Partial<DynamicEyeAssessment>; os?: Partial<DynamicEyeAssessment> };
               static?: { od?: Partial<StaticEyeAssessment>; os?: Partial<StaticEyeAssessment> };
-              fitConclusion?: string;
-              predictOverRefractionDs?: string;
-              accurateSphericalOverRefractionDs?: string;
+              fitConclusion?: string | Partial<EyeKeyedStrings>;
+              predictOverRefractionDs?: string | Partial<EyeKeyedStrings>;
+              accurateSphericalOverRefractionDs?: string | Partial<EyeKeyedStrings>;
             };
             const base = emptyLensAssessmentPayload();
             setDynamicAssessment({
@@ -528,13 +551,40 @@ export default function FittingAssessmentScreen() {
               od: { ...base.static.od, ...p.static?.od },
               os: { ...base.static.os, ...p.static?.os },
             });
-            if (typeof p.fitConclusion === 'string') setFitConclusion(p.fitConclusion);
-            const pred = typeof p.predictOverRefractionDs === 'string' ? p.predictOverRefractionDs : '';
-            const acc = typeof p.accurateSphericalOverRefractionDs === 'string' ? p.accurateSphericalOverRefractionDs : '';
-            setPredictOverRefractionDs(pred);
-            setAccurateSphericalOverRefractionDs(acc);
-            if (pred.trim() && acc.trim()) {
-              setOverRefractionSnapshot({ predict: pred, accurate: acc });
+
+            const migrateEyeField = (v: string | Partial<EyeKeyedStrings> | undefined, legacy: string): EyeKeyedStrings => {
+              if (typeof v === 'string') return { od: v, os: v };
+              if (v && typeof v === 'object') {
+                return {
+                  od: typeof v.od === 'string' ? v.od : legacy,
+                  os: typeof v.os === 'string' ? v.os : legacy,
+                };
+              }
+              return { od: legacy, os: legacy };
+            };
+
+            const fcLegacy = typeof p.fitConclusion === 'string' ? p.fitConclusion : '';
+            const predLegacy = typeof p.predictOverRefractionDs === 'string' ? p.predictOverRefractionDs : '';
+            const accLegacy = typeof p.accurateSphericalOverRefractionDs === 'string' ? p.accurateSphericalOverRefractionDs : '';
+
+            const fc = migrateEyeField(p.fitConclusion, fcLegacy);
+            const pred = migrateEyeField(p.predictOverRefractionDs, predLegacy);
+            const acc = migrateEyeField(p.accurateSphericalOverRefractionDs, accLegacy);
+
+            setFitConclusionByEye(fc);
+            setPredictOverRefractionDsByEye(pred);
+            setAccurateSphericalOverRefractionDsByEye(acc);
+
+            const hasOverRx =
+              pred.od.trim() &&
+              pred.os.trim() &&
+              acc.od.trim() &&
+              acc.os.trim();
+            if (hasOverRx) {
+              setOverRefractionSnapshot({
+                od: { predict: pred.od, accurate: acc.od },
+                os: { predict: pred.os, accurate: acc.os },
+              });
             }
           } catch {
             /* ignore */
@@ -629,9 +679,9 @@ export default function FittingAssessmentScreen() {
     setAssessmentSubTab('dynamic');
     setDynamicAssessment({ od: emptyDynamicEye(), os: emptyDynamicEye() });
     setStaticAssessment({ od: emptyStaticEye(), os: emptyStaticEye() });
-    setFitConclusion('');
-    setPredictOverRefractionDs('');
-    setAccurateSphericalOverRefractionDs('');
+    setFitConclusionByEye({ od: '', os: '' });
+    setPredictOverRefractionDsByEye({ od: '', os: '' });
+    setAccurateSphericalOverRefractionDsByEye({ od: '', os: '' });
     setOverRefractionSnapshot(null);
     setLastSavedResultLabel(null);
     void AsyncStorage.removeItem(LENS_ASSESSMENT_STORAGE_KEY);
@@ -663,9 +713,9 @@ export default function FittingAssessmentScreen() {
     const aerr = getLensAssessmentValidationErrors(
       dynamicAssessment,
       staticAssessment,
-      fitConclusion,
-      predictOverRefractionDs,
-      accurateSphericalOverRefractionDs
+      fitConclusionByEye,
+      predictOverRefractionDsByEye,
+      accurateSphericalOverRefractionDsByEye
     );
     if (aerr.length > 0) {
       setAssessmentSaveNotice(aerr[0]);
@@ -676,14 +726,20 @@ export default function FittingAssessmentScreen() {
       const payload = {
         dynamic: dynamicAssessment,
         static: staticAssessment,
-        fitConclusion,
-        predictOverRefractionDs,
-        accurateSphericalOverRefractionDs,
+        fitConclusion: fitConclusionByEye,
+        predictOverRefractionDs: predictOverRefractionDsByEye,
+        accurateSphericalOverRefractionDs: accurateSphericalOverRefractionDsByEye,
       };
       await AsyncStorage.setItem(LENS_ASSESSMENT_STORAGE_KEY, JSON.stringify(payload));
       setOverRefractionSnapshot({
-        predict: predictOverRefractionDs,
-        accurate: accurateSphericalOverRefractionDs,
+        od: {
+          predict: predictOverRefractionDsByEye.od,
+          accurate: accurateSphericalOverRefractionDsByEye.od,
+        },
+        os: {
+          predict: predictOverRefractionDsByEye.os,
+          accurate: accurateSphericalOverRefractionDsByEye.os,
+        },
       });
       setAssessmentSaveNotice('Lens assessment saved');
       setTimeout(() => setAssessmentSaveNotice(null), 2200);
@@ -691,7 +747,13 @@ export default function FittingAssessmentScreen() {
       setAssessmentSaveNotice('Could not save');
       setTimeout(() => setAssessmentSaveNotice(null), 2200);
     }
-  }, [dynamicAssessment, staticAssessment, fitConclusion, predictOverRefractionDs, accurateSphericalOverRefractionDs]);
+  }, [
+    dynamicAssessment,
+    staticAssessment,
+    fitConclusionByEye,
+    predictOverRefractionDsByEye,
+    accurateSphericalOverRefractionDsByEye,
+  ]);
 
   const currentDynamic = dynamicAssessment[assessmentEye];
   const currentStatic = staticAssessment[assessmentEye];
@@ -703,9 +765,9 @@ export default function FittingAssessmentScreen() {
       finalFit,
       dynamicAssessment,
       staticAssessment,
-      fitConclusion,
-      predictOverRefractionDs,
-      accurateSphericalOverRefractionDs,
+      fitConclusion: fitConclusionByEye,
+      predictOverRefractionDs: predictOverRefractionDsByEye,
+      accurateSphericalOverRefractionDs: accurateSphericalOverRefractionDsByEye,
     }),
     [
       fittingLensType,
@@ -713,9 +775,9 @@ export default function FittingAssessmentScreen() {
       finalFit,
       dynamicAssessment,
       staticAssessment,
-      fitConclusion,
-      predictOverRefractionDs,
-      accurateSphericalOverRefractionDs,
+      fitConclusionByEye,
+      predictOverRefractionDsByEye,
+      accurateSphericalOverRefractionDsByEye,
     ]
   );
 
@@ -1187,8 +1249,9 @@ export default function FittingAssessmentScreen() {
             </View>
 
             <Text style={[styles.intro, { color: c.placeholder, marginBottom: 10, marginTop: 4 }]}>
-              All Dynamic and Static fields are required for both OD and OS, plus fit conclusion and both over-refraction
-              DS values. Lens assessment can be saved only when this full set is complete.
+              All Dynamic and Static fields are required for both OD and OS. On the Static tab, also enter fit conclusion
+              and both over-refraction DS values for each eye (switch OD/OS). Lens assessment can be saved only when the
+              full set is complete.
             </Text>
 
             <View style={styles.row}>
@@ -1398,54 +1461,65 @@ export default function FittingAssessmentScreen() {
                     />
                   </View>
                 </View>
+
+                <Text style={[styles.sectionTitle, { color: c.text, marginTop: 22 }]}>
+                  Fit conclusion and over refraction ({assessmentEye === 'od' ? 'OD' : 'OS'})
+                </Text>
+                <Text style={[styles.intro, { color: c.placeholder, marginBottom: 10 }]}>
+                  Enter these for each eye using the OD / OS toggle above. They apply to the static assessment for that
+                  eye.
+                </Text>
+
+                <Text style={[styles.label, { color: c.text }]}>Fit conclusion</Text>
+                <Text style={[styles.subLabel, { color: c.placeholder }]}>
+                  Describe lens fit outcome, recommendations, or follow-up for this eye.
+                </Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    styles.inputMultiline,
+                    styles.fitConclusionInput,
+                    { backgroundColor: c.background, borderColor: c.border, color: c.text },
+                  ]}
+                  placeholder="e.g. Acceptable alignment; minor temporal edge lift…"
+                  placeholderTextColor={c.placeholder}
+                  value={fitConclusionByEye[assessmentEye]}
+                  onChangeText={(v) => {
+                    setFitConclusionByEye((prev) => ({ ...prev, [assessmentEye]: v }));
+                    setOverRefractionSnapshot(null);
+                  }}
+                  multiline
+                />
+
+                <Text style={[styles.overRefBlockTitle, { color: c.text }]}>Predict the over refraction</Text>
+                <Text style={[styles.dsFieldTitle, { color: c.primary }]}>DS</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
+                  placeholder="D"
+                  placeholderTextColor={c.placeholder}
+                  value={predictOverRefractionDsByEye[assessmentEye]}
+                  onChangeText={(v) => {
+                    setPredictOverRefractionDsByEye((prev) => ({ ...prev, [assessmentEye]: v }));
+                    setOverRefractionSnapshot(null);
+                  }}
+                  keyboardType="numbers-and-punctuation"
+                />
+
+                <Text style={[styles.overRefBlockTitle, { color: c.text }]}>Perform accurate spherical over refraction</Text>
+                <Text style={[styles.dsFieldTitle, { color: c.primary }]}>DS</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
+                  placeholder="D"
+                  placeholderTextColor={c.placeholder}
+                  value={accurateSphericalOverRefractionDsByEye[assessmentEye]}
+                  onChangeText={(v) => {
+                    setAccurateSphericalOverRefractionDsByEye((prev) => ({ ...prev, [assessmentEye]: v }));
+                    setOverRefractionSnapshot(null);
+                  }}
+                  keyboardType="numbers-and-punctuation"
+                />
               </>
             )}
-
-            <Text style={[styles.label, { color: c.text }]}>Fit conclusion</Text>
-            <Text style={[styles.subLabel, { color: c.placeholder }]}>
-              Describe the overall lens fit outcome, recommendations, or follow-up.
-            </Text>
-            <TextInput
-              style={[
-                styles.input,
-                styles.inputMultiline,
-                styles.fitConclusionInput,
-                { backgroundColor: c.background, borderColor: c.border, color: c.text },
-              ]}
-              placeholder="e.g. Acceptable alignment; minor temporal edge lift OS…"
-              placeholderTextColor={c.placeholder}
-              value={fitConclusion}
-              onChangeText={setFitConclusion}
-              multiline
-            />
-
-            <Text style={[styles.overRefBlockTitle, { color: c.text }]}>Predict the over refraction</Text>
-            <Text style={[styles.dsFieldTitle, { color: c.primary }]}>DS</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
-              placeholder="D"
-              placeholderTextColor={c.placeholder}
-              value={predictOverRefractionDs}
-              onChangeText={(v) => {
-                setPredictOverRefractionDs(v);
-                setOverRefractionSnapshot(null);
-              }}
-              keyboardType="numbers-and-punctuation"
-            />
-
-            <Text style={[styles.overRefBlockTitle, { color: c.text }]}>Perform accurate spherical over refraction</Text>
-            <Text style={[styles.dsFieldTitle, { color: c.primary }]}>DS</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
-              placeholder="D"
-              placeholderTextColor={c.placeholder}
-              value={accurateSphericalOverRefractionDs}
-              onChangeText={(v) => {
-                setAccurateSphericalOverRefractionDs(v);
-                setOverRefractionSnapshot(null);
-              }}
-              keyboardType="numbers-and-punctuation"
-            />
 
             {assessmentSaveNotice ? (
               <Text style={[styles.saveNotice, { color: c.primary }]} accessibilityLiveRegion="polite">
@@ -1472,19 +1546,33 @@ export default function FittingAssessmentScreen() {
                 ]}
               >
                 <Text style={[styles.recordedOverRefHeading, { color: c.text }]}>Over refraction (recorded)</Text>
-                <Text style={[styles.recordedOverRefSection, { color: c.placeholder }]}>
-                  Predict the over refraction
-                </Text>
+
+                <Text style={[styles.recordedEyeHeading, { color: c.text }]}>OD</Text>
+                <Text style={[styles.recordedOverRefSection, { color: c.placeholder }]}>Predict the over refraction</Text>
                 <Text style={[styles.dsFieldTitle, { color: c.primary }]}>DS</Text>
                 <Text style={[styles.recordedOverRefValue, { color: c.text }]}>
-                  {overRefractionSnapshot.predict.trim() ? overRefractionSnapshot.predict : '—'}
+                  {overRefractionSnapshot.od.predict.trim() ? overRefractionSnapshot.od.predict : '—'}
                 </Text>
-                <Text style={[styles.recordedOverRefSection, { color: c.placeholder, marginTop: 10 }]}>
+                <Text style={[styles.recordedOverRefSection, { color: c.placeholder, marginTop: 8 }]}>
                   Perform accurate spherical over refraction
                 </Text>
                 <Text style={[styles.dsFieldTitle, { color: c.primary }]}>DS</Text>
                 <Text style={[styles.recordedOverRefValue, { color: c.text }]}>
-                  {overRefractionSnapshot.accurate.trim() ? overRefractionSnapshot.accurate : '—'}
+                  {overRefractionSnapshot.od.accurate.trim() ? overRefractionSnapshot.od.accurate : '—'}
+                </Text>
+
+                <Text style={[styles.recordedEyeHeading, { color: c.text, marginTop: 14 }]}>OS</Text>
+                <Text style={[styles.recordedOverRefSection, { color: c.placeholder }]}>Predict the over refraction</Text>
+                <Text style={[styles.dsFieldTitle, { color: c.primary }]}>DS</Text>
+                <Text style={[styles.recordedOverRefValue, { color: c.text }]}>
+                  {overRefractionSnapshot.os.predict.trim() ? overRefractionSnapshot.os.predict : '—'}
+                </Text>
+                <Text style={[styles.recordedOverRefSection, { color: c.placeholder, marginTop: 8 }]}>
+                  Perform accurate spherical over refraction
+                </Text>
+                <Text style={[styles.dsFieldTitle, { color: c.primary }]}>DS</Text>
+                <Text style={[styles.recordedOverRefValue, { color: c.text }]}>
+                  {overRefractionSnapshot.os.accurate.trim() ? overRefractionSnapshot.os.accurate : '—'}
                 </Text>
               </View>
             ) : null}
@@ -1518,8 +1606,8 @@ export default function FittingAssessmentScreen() {
               <Text style={[styles.sectionTitle, { color: c.text }]}>Fitting result</Text>
               <Text style={[styles.intro, { color: c.placeholder, marginBottom: 0 }]}>
                 The report preview below is organized by section. It unlocks when every required field is complete: at
-                least one full trial (others may be empty), both eyes in Parameters and Assessment, fit conclusion, and
-                both over-refraction DS values.
+                least one full trial (others may be empty), both eyes in Parameters and Assessment, and on the Static
+                assessment tab — fit conclusion and both over-refraction DS values for OD and OS.
               </Text>
             </View>
 
@@ -1803,6 +1891,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   recordedOverRefHeading: { fontSize: 16, fontWeight: '700', marginBottom: 10 },
+  recordedEyeHeading: { fontSize: 14, fontWeight: '700', marginBottom: 4 },
   recordedOverRefSection: { fontSize: 12, fontWeight: '600', marginBottom: 2 },
   recordedOverRefValue: { fontSize: 16, fontWeight: '600', lineHeight: 22 },
   unitHint: { fontSize: 12, marginTop: -4, marginBottom: 6 },
